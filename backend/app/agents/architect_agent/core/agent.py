@@ -1,7 +1,7 @@
 """Architect Agent - A2A Server for architecture design"""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict,List
 from datetime import datetime
 
 from ...shared.a2a_server.server import A2AServer, TaskHandler

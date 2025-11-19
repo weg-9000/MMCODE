@@ -6,9 +6,10 @@ from typing import Any, Dict, List, Set
 from dataclasses import dataclass
 from datetime import datetime
 
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import BaseMessage
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage
 
 from ..models.analysis_models import AnalysisResult, Entity, UseCase, QualityAttribute, AmbiguousItem
 

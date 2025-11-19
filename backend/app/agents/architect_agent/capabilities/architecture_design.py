@@ -5,8 +5,8 @@ import uuid
 from typing import Dict, Any, List
 from datetime import datetime
 
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 
 from ..models.architecture_models import (
     ArchitectureDesign, ArchitecturePattern, ScalabilityTier,
