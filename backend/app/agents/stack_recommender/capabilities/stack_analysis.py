@@ -26,18 +26,58 @@ class StackAnalysisEngine:
     """Core engine for analyzing requirements and recommending technology stacks"""
     
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model=settings.openai_model,
-            temperature=settings.openai_temperature,
-            max_tokens=settings.openai_max_tokens,
-            openai_api_key=settings.openai_api_key
-        )
+        # Initialize LLM with unified provider support
+        self._initialize_llm()
         
         self.knowledge_searcher = KnowledgeSearcher()
         self.template_matcher = TemplateMatcher()
         
         # Setup prompts
         self._setup_prompts()
+
+    def _initialize_llm(self):
+        """Initialize LLM with unified provider system and fallback compatibility"""
+        try:
+            # Modern: Try to use unified LLM provider system
+            from app.core.llm_providers import DevStrategistLLMManager
+            from app.core.config import settings as global_settings
+            
+            # Check if we have unified LLM configuration
+            if hasattr(global_settings, 'LLM_API_KEY') and global_settings.LLM_API_KEY:
+                llm_manager = DevStrategistLLMManager(
+                    api_key=global_settings.LLM_API_KEY,
+                    provider_name=getattr(global_settings, 'LLM_PROVIDER', None),
+                    model=getattr(global_settings, 'LLM_MODEL', None),
+                    temperature=getattr(global_settings, 'LLM_TEMPERATURE', settings.openai_temperature),
+                    max_tokens=getattr(global_settings, 'LLM_MAX_TOKENS', settings.openai_max_tokens),
+                    timeout=getattr(global_settings, 'LLM_TIMEOUT', 30)
+                )
+                
+                # Get LLM instance synchronously
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
+                except RuntimeError:
+                    # If no event loop, create one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
+                    
+                logger.info("LLM initialized with unified provider system")
+                return
+                
+        except Exception as e:
+            logger.warning(f"Failed to initialize with unified provider, falling back to settings: {e}")
+        
+        # Fallback: Use enhanced settings-based initialization with unified support
+        self.llm = ChatOpenAI(
+            model=settings.effective_model,
+            temperature=settings.effective_temperature,
+            max_tokens=settings.effective_max_tokens,
+            openai_api_key=settings.effective_api_key
+        )
+        logger.info(f"LLM initialized with settings-based configuration: model={settings.effective_model}, provider=OpenAI")
     
     def _setup_prompts(self):
         """Setup LangChain prompts for stack analysis"""

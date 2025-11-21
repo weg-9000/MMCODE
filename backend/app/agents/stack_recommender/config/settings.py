@@ -25,11 +25,40 @@ class StackRecommenderSettings(BaseSettings):
     a2a_auth_type: str = Field(default="OAuth2", description="Authentication type")
     a2a_auth_token: Optional[str] = Field(None, description="Authentication token", env="A2A_AUTH_TOKEN")
     
-    # LLM Configuration
-    openai_api_key: str = Field(..., description="OpenAI API key", env="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4", description="OpenAI model name")
-    openai_temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="LLM temperature")
-    openai_max_tokens: int = Field(default=2000, description="Maximum tokens for LLM response")
+    # Unified LLM Configuration (Primary)
+    llm_api_key: Optional[str] = Field(default=None, description="Unified LLM API key", env="LLM_API_KEY")
+    llm_provider: Optional[str] = Field(default=None, description="LLM provider", env="LLM_PROVIDER")
+    llm_model: Optional[str] = Field(default=None, description="LLM model", env="LLM_MODEL")
+    llm_temperature: float = Field(default=0.3, ge=0.0, le=2.0, description="LLM temperature", env="LLM_TEMPERATURE")
+    llm_max_tokens: int = Field(default=2000, description="Maximum tokens", env="LLM_MAX_TOKENS")
+    llm_timeout: int = Field(default=30, description="LLM timeout", env="LLM_TIMEOUT")
+    
+    # Legacy LLM Configuration (Backward Compatibility)
+    openai_api_key: Optional[str] = Field(default=None, description="Legacy OpenAI API key", env="OPENAI_API_KEY")
+    openai_model: Optional[str] = Field(default=None, description="Legacy OpenAI model")
+    openai_temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Legacy LLM temperature")
+    openai_max_tokens: Optional[int] = Field(default=None, description="Legacy maximum tokens")
+    
+    # Computed properties for backward compatibility
+    @property
+    def effective_api_key(self) -> str:
+        """Get effective API key (unified or legacy)"""
+        return self.llm_api_key or self.openai_api_key or ""
+    
+    @property
+    def effective_model(self) -> str:
+        """Get effective model (unified or legacy)"""
+        return self.llm_model or self.openai_model or "gpt-4"
+    
+    @property
+    def effective_temperature(self) -> float:
+        """Get effective temperature (unified or legacy)"""
+        return self.llm_temperature if self.llm_temperature is not None else (self.openai_temperature or 0.3)
+    
+    @property
+    def effective_max_tokens(self) -> int:
+        """Get effective max tokens (unified or legacy)"""
+        return self.llm_max_tokens if self.llm_max_tokens is not None else (self.openai_max_tokens or 2000)
     
     # Database Configuration  
     supabase_url: str = Field(..., description="Supabase URL", env="SUPABASE_URL")

@@ -24,12 +24,50 @@ class RequirementAnalysisEngine:
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
         
-        # Initialize LangChain LLM
-        self.llm = ChatOpenAI(
-            model=config.get("openai_model", "gpt-3.5-turbo"),
-            temperature=0.1,  # Low temperature for consistent analysis
-            openai_api_key=config.get("openai_api_key")
-        )
+        # Initialize LLM with unified provider support
+        self._initialize_llm(config)
+
+    def _initialize_llm(self, config: Dict[str, Any]):
+        """Initialize LLM with unified provider system and fallback compatibility"""
+        try:
+            # Modern: Check if we have a unified LLM manager or provider
+            if hasattr(config, 'get_llm_config') and callable(config.get_llm_config):
+                # AgentConfig with unified LLM support
+                from app.core.llm_providers import DevStrategistLLMManager 
+                llm_config = config.get_llm_config()
+                llm_manager = DevStrategistLLMManager(**llm_config)
+                
+                # Note: We'll get the LLM instance synchronously for now
+                # In a production system, you'd want to handle this asynchronously
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
+                except RuntimeError:
+                    # If no event loop, create one
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
+                    
+                self.logger.info("LLM initialized with unified provider system")
+                
+            else:
+                # Legacy: Fallback to OpenAI direct initialization
+                self.llm = ChatOpenAI(
+                    model=config.get("openai_model", config.get("llm_model", "gpt-3.5-turbo")),
+                    temperature=config.get("temperature", config.get("llm_temperature", 0.1)),
+                    openai_api_key=config.get("openai_api_key", config.get("llm_api_key"))
+                )
+                self.logger.info("LLM initialized with legacy OpenAI configuration")
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize with unified provider, falling back to OpenAI: {e}")
+            # Ultimate fallback: Basic OpenAI initialization
+            self.llm = ChatOpenAI(
+                model=config.get("openai_model", "gpt-3.5-turbo"),
+                temperature=0.1,
+                openai_api_key=config.get("openai_api_key")
+            )
         
         # Analysis prompt template
         self.analysis_prompt = ChatPromptTemplate.from_template(

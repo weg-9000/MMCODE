@@ -15,6 +15,10 @@ load_dotenv()
 from .core.config import settings
 from .core.exceptions import (
     DevStrategistException,
+    ValidationException,
+    AgentCommunicationException,
+    LLMServiceException,
+    ProcessingException,
     dev_strategist_exception_handler,
     validation_exception_handler,
     http_exception_handler
