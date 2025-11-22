@@ -54,9 +54,9 @@ class RequirementAnalysisEngine:
             else:
                 # Legacy: Fallback to OpenAI direct initialization
                 self.llm = ChatOpenAI(
-                    model=config.get("openai_model", config.get("llm_model", "gpt-3.5-turbo")),
+                    model=config.get("llm_model"),
                     temperature=config.get("temperature", config.get("llm_temperature", 0.1)),
-                    openai_api_key=config.get("openai_api_key", config.get("llm_api_key"))
+                    openai_api_key=config.get("llm_api_key")
                 )
                 self.logger.info("LLM initialized with legacy OpenAI configuration")
                 

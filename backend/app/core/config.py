@@ -1,7 +1,7 @@
+import os
 from typing import Optional, List, Dict, Any
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator, BaseModel
-import re
 import logging
 
 class Settings(BaseSettings):
@@ -184,8 +184,9 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_file = ".env"
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), ".env")
         env_file_encoding = "utf-8"
+        extra = "ignore" 
         case_sensitive = True
 
     @field_validator("SECRET_KEY")

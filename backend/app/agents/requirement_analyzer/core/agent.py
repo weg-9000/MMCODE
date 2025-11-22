@@ -19,7 +19,7 @@ class RequirementAnalyzer:
     Analyzes user requirements and coordinates other agents via A2A protocol.
     """
     
-    def __init__(self, agent_config: Dict[str, Any]):
+    def __init__(self, agent_config: Dict[str, Any], a2a_client=None):
         self.agent_id = "requirement-analyzer"
         self.agent_name = "Requirement Analyzer & Orchestrator"
         self.config = agent_config
@@ -30,8 +30,11 @@ class RequirementAnalyzer:
         self.decomposition_engine = TaskDecompositionEngine(agent_config)
         self.coordinator = AgentCoordinator(agent_config)
         
-        # A2A Client for communicating with other agents
-        self.a2a_client = A2AClient(timeout=300)  # 5 minute timeout for complex tasks
+        if a2a_client:
+            self.a2a_client = a2a_client
+        else:
+            # 기존 코드: 내부 생성
+            self.a2a_client = A2AClient(timeout=300)
         
         # Known agent endpoints (from configuration or registry)
         self.agent_endpoints = {

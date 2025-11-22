@@ -215,7 +215,4 @@ class StackRecommenderAgent(A2AServer):
         
         return recommendations
 
-
-# Note: This file now defines the StackRecommenderAgent class.
-# The actual server instantiation should be handled by the main application
-# that imports this agent and provides the necessary configuration.
+agent_server = StackRecommenderAgent({}) 

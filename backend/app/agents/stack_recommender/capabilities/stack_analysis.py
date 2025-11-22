@@ -7,9 +7,8 @@ from typing import Dict, Any, List, Optional, Tuple
 import asyncio
 import json
 import logging
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import BaseMessage
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 
 from ..models.stack_models import (
     StackRecommendation, TechnologyChoice, StackCategory, 

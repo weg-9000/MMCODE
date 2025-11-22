@@ -32,9 +32,9 @@ class ComponentModelingEngine:
         # Initialize LLM with proper configuration
         try:
             self.llm = ChatOpenAI(
-                model=config.get("openai_model", "gpt-4"),
+                model=config.get("llm_model"),
                 temperature=0.2,
-                openai_api_key=config.get("openai_api_key"),
+                openai_api_key=config.get("llm_api_key"),
                 timeout=config.get("llm_timeout", 60),
                 max_retries=config.get("llm_max_retries", 3)
             )
@@ -736,22 +736,30 @@ Focus on creating cohesive components with clear responsibilities and minimal co
         """
         Validate configuration parameters
         """
-        required_keys = ["openai_api_key"]
-        missing_keys = [key for key in required_keys if key not in config]
+        # 1. API Key Existence Check (Unified + Legacy)
+        api_key = config.get("llm_api_key") or config.get("openai_api_key")
         
-        if missing_keys:
+        if not api_key:
+            # 기존 코드 호환성을 위해 openai_api_key가 없다고 에러 메시지 출력
             raise ValidationException(
                 message="Missing required configuration parameters",
-                details={"missing_keys": missing_keys}
+                details={"missing_keys": ["openai_api_key"]},
+                field="api_key",
+                value="None"
             )
         
-        # Validate API key format (basic check)
-        api_key = config.get("openai_api_key", "")
-        if not api_key or not api_key.startswith(("sk-", "sk-proj-")):
+        # 2. Validate API key format (Expanded for Perplexity support)
+        valid_prefixes = ("sk-", "sk-proj-", "pplx-", "sk-ant-", "AIza")
+        
+        if not api_key.startswith(valid_prefixes):
+            masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
             raise ValidationException(
-                message="Invalid OpenAI API key format",
-                details={"expected_format": "sk-* or sk-proj-*"}
+                message="Invalid API key format",
+                details={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"},
+                field="api_key",
+                value=masked_key
             )
+
     
     async def _fallback_component_generation(self, 
                                            architecture: ArchitectureDesign,

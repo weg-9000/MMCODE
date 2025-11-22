@@ -18,7 +18,7 @@ Usage:
     app = agent_server.app
 """
 
-from .core.agent import agent_server, A2AStackRecommenderServer
+from .core.agent import agent_server, StackRecommenderAgent as A2AStackRecommenderServer
 from .capabilities.stack_analysis import StackAnalysisEngine
 from .utils.quality_scorer import QualityScorer
 from .utils.knowledge_search import KnowledgeSearcher

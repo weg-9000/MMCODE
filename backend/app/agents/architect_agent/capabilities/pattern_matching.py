@@ -17,7 +17,6 @@ from ....core.exceptions import (
     DevStrategistException, ValidationException, LLMServiceException
 )
 
-
 class PatternMatchingEngine:
     """
     Engine for matching architectural patterns to requirements and context
@@ -30,17 +29,21 @@ class PatternMatchingEngine:
         
         # Initialize LLM with proper configuration
         try:
+            # Determine model and api key with fallback
+            model_name = config.get("llm_model")
+            api_key = config.get("llm_api_key")
+            
             self.llm = ChatOpenAI(
-                model=config.get("openai_model", "gpt-4"),
+                model=model_name,
                 temperature=0.3,
-                openai_api_key=config.get("openai_api_key"),
+                openai_api_key=api_key,
                 timeout=config.get("llm_timeout", 60),
                 max_retries=config.get("llm_max_retries", 3)
             )
         except Exception as e:
             raise LLMServiceException(
                 message="Failed to initialize LLM client",
-                details={"error": str(e), "config": {k: v for k, v in config.items() if k != "openai_api_key"}}
+                details={"error": str(e), "config": {k: v for k, v in config.items() if "api_key" not in k}}
             )
         
         # Pattern recommendation prompt
@@ -224,7 +227,9 @@ Focus on practical, proven patterns that match the system's requirements and con
             except json.JSONDecodeError as e:
                 raise ValidationException(
                     message="Invalid JSON response from LLM",
-                    details={"response_content": response.content[:500], "error": str(e)}
+                    details={"response_content": response.content[:500], "error": str(e)},
+                    field="llm_response",
+                    value="Invalid JSON"
                 )
             
         except (LLMServiceException, ValidationException):
@@ -266,7 +271,9 @@ Focus on practical, proven patterns that match the system's requirements and con
         if not patterns:
             raise ValidationException(
                 message="No valid patterns could be generated",
-                details={"llm_result": llm_result}
+                details={"llm_result": llm_result},
+                field="patterns",
+                value="Empty list"
             )
         
         return patterns
@@ -445,19 +452,28 @@ Focus on practical, proven patterns that match the system's requirements and con
         """
         Validate configuration parameters
         """
-        required_keys = ["openai_api_key"]
-        missing_keys = [key for key in required_keys if key not in config]
+        # 1. API Key Existence Check (Unified + Legacy)
+        api_key = config.get("llm_api_key") or config.get("openai_api_key")
         
-        if missing_keys:
+        if not api_key:
             raise ValidationException(
                 message="Missing required configuration parameters",
-                details={"missing_keys": missing_keys}
+                details={"missing_keys": ["llm_api_key (or openai_api_key)"]},
+                field="api_key",
+                value="None"
             )
         
-        # Validate API key format (basic check)
-        api_key = config.get("openai_api_key", "")
-        if not api_key or not api_key.startswith(("sk-", "sk-proj-")):
+        # 2. Validate API key format (Expanded for Perplexity support)
+        # Supported prefixes: sk- (OpenAI), sk-proj- (OpenAI Project), pplx- (Perplexity)
+        valid_prefixes = ("sk-", "sk-proj-", "pplx-", "sk-ant-", "AIza")
+        
+        if not api_key.startswith(valid_prefixes):
+            # Masking key for security
+            masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+            
             raise ValidationException(
-                message="Invalid OpenAI API key format",
-                details={"expected_format": "sk-* or sk-proj-*"}
+                message="Invalid API key format",
+                details={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"},
+                field="api_key",
+                value=masked_key
             )
