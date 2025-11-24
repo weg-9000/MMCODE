@@ -51,23 +51,66 @@ class AgentUpdate(BaseModel):
     endpoint_url: Optional[str] = None
     capabilities: Optional[List[str]] = None
     status: Optional[AgentStatus] = None
-    version: Optional[str] = None
 
 
 class AgentResponse(AgentBase):
     """Schema for agent response"""
     model_config = ConfigDict(from_attributes=True)
     
-    capabilities: List[str] = Field(default_factory=list)
     status: AgentStatus
+    capabilities: List[str] = Field(default_factory=list)
     created_at: datetime
     last_seen: Optional[datetime] = None
     
-    # Health and performance metrics
-    total_tasks: Optional[int] = None
-    completed_tasks: Optional[int] = None
-    average_quality_score: Optional[float] = None
-    average_processing_time: Optional[float] = None
+    # Optional task history
+    recent_tasks: Optional[List[Dict[str, Any]]] = None
+
+
+class AgentCard(BaseModel):
+    """Agent card for A2A discovery"""
+    agent_id: str
+    name: str
+    description: str
+    endpoint_url: str
+    version: str
+    capabilities: List[str]
+    authentication: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# Shared enums
+class Priority(str, Enum):
+    """Task priority levels"""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class TaskStatus(str, Enum):
+    """Task execution status"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TaskRequest(BaseModel):
+    """Request schema for creating agent tasks"""
+    session_id: str
+    task_type: str
+    context: Dict[str, Any]
+    priority: Optional[Priority] = Priority.MEDIUM
+    timeout: Optional[int] = Field(300, description="Task timeout in seconds")
+
+
+class TaskResponse(BaseModel):
+    """Response schema for task creation"""
+    task_id: str
+    agent_id: str
+    status: TaskStatus
+    created_at: datetime
+    estimated_completion: Optional[datetime] = None
 
 
 class AgentHealthCheck(BaseModel):

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from enum import Enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class TaskStatus(Enum):
@@ -56,7 +56,7 @@ class A2AMessage:
     receiver_id: str = ""
     message_type: str = "task"
     content: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     correlation_id: Optional[str] = None
 
 
@@ -69,8 +69,8 @@ class A2ATask:
     context: Dict[str, Any] = field(default_factory=dict)
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     assigned_agent: Optional[str] = None
     parent_task_id: Optional[str] = None
     dependencies: List[str] = field(default_factory=list)
@@ -84,5 +84,5 @@ class Artifact:
     content: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     quality_score: Optional[float] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    created_by: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_by: Optional[str] = None 

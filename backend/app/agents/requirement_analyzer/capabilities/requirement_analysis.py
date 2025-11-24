@@ -4,7 +4,7 @@ import re
 import logging
 from typing import Any, Dict, List, Set
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 from langchain_openai import ChatOpenAI
@@ -192,13 +192,14 @@ Focus on:
         """
         Use LLM for initial structured analysis
         """
+        import json
+        
         try:
             response = await self.llm.ainvoke(
                 self.analysis_prompt.format_messages(requirements=requirements)
             )
             
             # Parse JSON response
-            import json
             result = json.loads(response.content)
             
             return result
@@ -295,7 +296,7 @@ Focus on:
         Calculate analysis metadata and statistics
         """
         return {
-            "analysis_timestamp": datetime.utcnow().isoformat(),
+            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
             "requirements_length": len(requirements),
             "word_count": len(requirements.split()),
             "sentence_count": len([s for s in requirements.split('.') if s.strip()]),

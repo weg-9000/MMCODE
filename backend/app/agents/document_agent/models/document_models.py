@@ -1,7 +1,7 @@
 """Document Agent Models - Data structures for document generation"""
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -154,8 +154,8 @@ class DocumentationSuite(BaseModel):
     documents: List[GeneratedDocument] = Field(default_factory=list)
     
     # Suite metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0.0"
     
     # Quality aggregation
@@ -189,7 +189,7 @@ class DocumentationSuite(BaseModel):
     def add_document(self, document: GeneratedDocument):
         """Add document to suite"""
         self.documents.append(document)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         self.suite_quality_score = self.calculate_suite_quality()
         self.update_coverage_matrix()
     

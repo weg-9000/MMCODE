@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -77,7 +77,7 @@ class A2AServer(ABC):
             
             handler = self.task_handlers[request.task_type]
             task.status = TaskStatus.IN_PROGRESS
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             
             # Execute task handler
             result = await handler(task)
@@ -98,7 +98,7 @@ class A2AServer(ABC):
                 task.status = TaskStatus.COMPLETED
                 response_artifact = None
             
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             
             return A2ATaskResponse(
                 task_id=task.task_id,
@@ -110,7 +110,7 @@ class A2AServer(ABC):
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error = str(e)
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             
             self.logger.error(f"Task {task.task_id} failed: {e}")
             

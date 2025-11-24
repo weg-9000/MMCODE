@@ -41,7 +41,9 @@ class ComponentModelingEngine:
         except Exception as e:
             raise LLMServiceException(
                 message="Failed to initialize LLM client",
-                details={"error": str(e), "config": {k: v for k, v in config.items() if k != "openai_api_key"}}
+                model="unknown",
+                operation="initialization",
+                context={"error": str(e), "config": {k: v for k, v in config.items() if k != "openai_api_key"}}
             )
         
         # Component modeling prompt
@@ -135,8 +137,8 @@ Focus on creating cohesive components with clear responsibilities and minimal co
             self.logger.error(f"Component modeling failed: {e}")
             raise DevStrategistException(
                 message="Component modeling process failed",
-                details={"error": str(e), "architecture_id": getattr(architecture, 'id', 'unknown')},
-                error_code="COMPONENT_MODELING_FAILED"
+                code="COMPONENT_MODELING_FAILED",
+                context={"error": str(e), "architecture_id": getattr(architecture, 'id', 'unknown')}
             ) from e
     
     async def derive_components_from_entities(self, 
@@ -254,7 +256,9 @@ Focus on creating cohesive components with clear responsibilities and minimal co
             except json.JSONDecodeError as e:
                 raise ValidationException(
                     message="Invalid JSON response from LLM",
-                    details={"response_content": response.content[:500], "error": str(e)}
+                    field="llm_response", 
+                    value="Invalid JSON",
+                    context={"response_content": response.content[:500], "error": str(e)}
                 )
             
         except (LLMServiceException, ValidationException):
@@ -263,7 +267,9 @@ Focus on creating cohesive components with clear responsibilities and minimal co
             self.logger.warning(f"LLM component generation failed: {e}")
             raise LLMServiceException(
                 message="LLM component generation failed",
-                details={"error": str(e), "architecture_complexity": architecture.complexity_level}
+                model="unknown",
+                operation="component_generation",
+                context={"error": str(e), "architecture_complexity": architecture.complexity_level}
             ) from e
     
     def _create_component_objects(self, llm_result: Dict[str, Any]) -> List[Component]:
@@ -296,7 +302,9 @@ Focus on creating cohesive components with clear responsibilities and minimal co
         if not components:
             raise ValidationException(
                 message="No valid components could be generated",
-                details={"llm_result": llm_result}
+                field="components",
+                value="empty_list",
+                context={"llm_result": llm_result}
             )
         
         return components
@@ -743,9 +751,9 @@ Focus on creating cohesive components with clear responsibilities and minimal co
             # 기존 코드 호환성을 위해 openai_api_key가 없다고 에러 메시지 출력
             raise ValidationException(
                 message="Missing required configuration parameters",
-                details={"missing_keys": ["openai_api_key"]},
                 field="api_key",
-                value="None"
+                value="None",
+                context={"missing_keys": ["openai_api_key"]}
             )
         
         # 2. Validate API key format (Expanded for Perplexity support)
@@ -755,9 +763,9 @@ Focus on creating cohesive components with clear responsibilities and minimal co
             masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
             raise ValidationException(
                 message="Invalid API key format",
-                details={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"},
                 field="api_key",
-                value=masked_key
+                value=masked_key,
+                context={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"}
             )
 
     

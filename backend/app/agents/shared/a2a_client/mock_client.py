@@ -1,7 +1,7 @@
 import uuid
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.agents.shared.models.a2a_models import A2ATask, TaskStatus
@@ -20,6 +20,23 @@ class InMemoryA2AClient:
         """로컬 호출할 에이전트 객체를 등록. agent_name은 예: architect-agent"""
         self._agents[agent_name] = agent_instance
 
+    def _extract_agent_name_from_url(self, agent_url: str) -> str:
+        """Extract agent name from various URL formats"""
+        if agent_url.startswith("local://"):
+            return agent_url.replace("local://", "")
+        elif "localhost" in agent_url:
+            # Map HTTP localhost URLs to agent names based on port
+            port = agent_url.split(":")[-1].rstrip("/")
+            port_to_name = {
+                "8001": "architect", 
+                "8002": "stack_recommender", 
+                "8003": "documenter"
+            }
+            return port_to_name.get(port, f"agent_port_{port}")
+        else:
+            # Fallback: use the last part of the URL
+            return agent_url.split("/")[-1].rstrip("/")
+
     async def create_task(
         self,
         agent_url: str,
@@ -28,12 +45,13 @@ class InMemoryA2AClient:
         correlation_id: Optional[str] = None,
         priority: int = 0,
     ) -> A2ATask:
-        """agent_url이 local://로 시작해야 하며, 바로 해당 객체의 handle_task(task) 비동기 호출."""
-        if not agent_url.startswith("local://"):
-            raise ValueError(f"Only local:// URLs supported, got: {agent_url}")
-        agent_name = agent_url.replace("local://", "")
+        """Create task on target agent, supporting both local:// and HTTP URLs"""
+        agent_name = self._extract_agent_name_from_url(agent_url)
+        self.logger.info(f"Extracted agent name '{agent_name}' from URL '{agent_url}'")
+        
         agent = self._agents.get(agent_name)
         if not agent:
+            self.logger.error(f"Agent [{agent_name}] not registered. Available: {list(self._agents.keys())}")
             raise RuntimeError(f"Agent [{agent_name}] not registered. Available: {list(self._agents.keys())}")
 
         task_id = str(uuid.uuid4())
@@ -43,7 +61,7 @@ class InMemoryA2AClient:
             task_type=task_type,
             status=TaskStatus.PENDING,
             context=context,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         self._tasks[task_id] = task
 
@@ -53,13 +71,13 @@ class InMemoryA2AClient:
     async def _safe_execute(self, agent, task: A2ATask):
         try:
             task.status = TaskStatus.IN_PROGRESS
-            task.started_at = datetime.utcnow()
+            task.started_at = datetime.now(timezone.utc)
             handler = getattr(agent, "handle_task", None) or getattr(agent, "process_task", None)
             if not handler:
                 raise AttributeError(f"{agent} has no handle_task or process_task method")
             result = await handler(task)   # 실제 에이전트 처리
             task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             task.result = getattr(result, "content", None) if hasattr(result, "content") else result
         except Exception as e:
             task.status = TaskStatus.FAILED
@@ -75,4 +93,40 @@ class InMemoryA2AClient:
 
     async def send_message(self, agent_url: str, message: Any) -> Dict[str, Any]:
         """agent_url로 메시지를 직접 함수 호출(테스트용 단순화)."""
-        return {"status": "sent", "timestamp": datetime.utcnow().isoformat()}
+        return {"status": "sent", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    async def create_task_with_wait(self, 
+                                   agent_url: str,
+                                   task_type: str, 
+                                   context: Dict[str, Any],
+                                   correlation_id: Optional[str] = None,
+                                   max_wait_time: float = 300.0) -> A2ATask:
+        """Create task and wait for completion (mock implementation)"""
+        task = await self.create_task(agent_url, task_type, context, correlation_id)
+        
+        # Wait for task completion with timeout
+        start_time = datetime.now(timezone.utc)
+        while task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+            if (datetime.now(timezone.utc) - start_time).total_seconds() > max_wait_time:
+                task.status = TaskStatus.FAILED
+                task.error = f"Task timeout after {max_wait_time} seconds"
+                break
+            await asyncio.sleep(0.1)  # Short polling interval for tests
+        
+        return task
+
+    async def get_agent_capabilities(self, agent_url: str) -> Dict[str, Any]:
+        """Get agent capabilities (mock implementation)"""
+        agent_name = self._extract_agent_name_from_url(agent_url)
+        if agent_name in self._agents:
+            return {
+                "agent_id": agent_name,
+                "capabilities": ["mock_capability"],
+                "status": "healthy"
+            }
+        else:
+            raise RuntimeError(f"Agent [{agent_name}] not registered")
+
+    async def close(self):
+        """Close client connection (mock - no-op)"""
+        pass

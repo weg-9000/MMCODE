@@ -20,8 +20,8 @@ class Session(Base):
     description = Column(Text, nullable=True)
     requirements_text = Column(Text, nullable=True)
     status = Column(String(50), default="active")  # active, completed, archived
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     tasks = relationship("Task", back_populates="session", cascade="all, delete-orphan")
@@ -43,8 +43,8 @@ class Agent(Base):
     capabilities = Column(JSON, nullable=True)  # List of capabilities
     status = Column(String(50), default="active")  # active, inactive, maintenance
     version = Column(String(50), default="1.0.0")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_seen = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_seen = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     tasks = relationship("Task", back_populates="agent")
@@ -72,9 +72,9 @@ class Task(Base):
     error_message = Column(Text, nullable=True)
     
     # Timing
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     processing_time = Column(Float, nullable=True)  # seconds
     
     # Quality assessment
@@ -113,8 +113,8 @@ class Artifact(Base):
     confidence_score = Column(Float, nullable=True)
     version = Column(String(20), default="1.0")
     created_by = Column(String(100), nullable=True)  # agent_id
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Flags
     is_final = Column(Boolean, default=True)
@@ -148,8 +148,8 @@ class KnowledgeEntry(Base):
     relevance_score = Column(Float, default=0.0)
     usage_count = Column(Float, default=0)
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<KnowledgeEntry(id='{self.id}', title='{self.title}', category='{self.category}')>"

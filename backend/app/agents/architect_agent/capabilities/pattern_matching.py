@@ -43,7 +43,9 @@ class PatternMatchingEngine:
         except Exception as e:
             raise LLMServiceException(
                 message="Failed to initialize LLM client",
-                details={"error": str(e), "config": {k: v for k, v in config.items() if "api_key" not in k}}
+                model=config.get("llm_model", "unknown"),
+                operation="initialization",
+                context={"error": str(e), "config": {k: v for k, v in config.items() if "api_key" not in k}}
             )
         
         # Pattern recommendation prompt
@@ -123,8 +125,8 @@ Focus on practical, proven patterns that match the system's requirements and con
             self.logger.error(f"Pattern recommendation failed: {e}")
             raise DevStrategistException(
                 message="Pattern recommendation process failed",
-                details={"error": str(e), "architecture_id": getattr(architecture, 'id', 'unknown')},
-                error_code="PATTERN_RECOMMENDATION_FAILED"
+                code="PATTERN_RECOMMENDATION_FAILED",
+                context={"error": str(e), "architecture_id": getattr(architecture, 'id', 'unknown')}
             ) from e
     
     async def explain_recommendations(self, patterns: List[ArchitecturalPattern]) -> Dict[str, str]:
@@ -227,9 +229,9 @@ Focus on practical, proven patterns that match the system's requirements and con
             except json.JSONDecodeError as e:
                 raise ValidationException(
                     message="Invalid JSON response from LLM",
-                    details={"response_content": response.content[:500], "error": str(e)},
                     field="llm_response",
-                    value="Invalid JSON"
+                    value="Invalid JSON",
+                    context={"response_content": response.content[:500], "error": str(e)}
                 )
             
         except (LLMServiceException, ValidationException):
@@ -238,7 +240,9 @@ Focus on practical, proven patterns that match the system's requirements and con
             self.logger.warning(f"LLM pattern generation failed: {e}")
             raise LLMServiceException(
                 message="LLM pattern generation failed",
-                details={"error": str(e), "architecture_complexity": architecture.complexity_level}
+                model="unknown",
+                operation="pattern_generation",
+                context={"error": str(e), "architecture_complexity": architecture.complexity_level}
             ) from e
     
     def _create_pattern_objects(self, llm_result: Dict[str, Any]) -> List[ArchitecturalPattern]:
@@ -271,7 +275,7 @@ Focus on practical, proven patterns that match the system's requirements and con
         if not patterns:
             raise ValidationException(
                 message="No valid patterns could be generated",
-                details={"llm_result": llm_result},
+                context={"llm_result": llm_result},
                 field="patterns",
                 value="Empty list"
             )
@@ -458,7 +462,7 @@ Focus on practical, proven patterns that match the system's requirements and con
         if not api_key:
             raise ValidationException(
                 message="Missing required configuration parameters",
-                details={"missing_keys": ["llm_api_key (or openai_api_key)"]},
+                context={"missing_keys": ["llm_api_key (or openai_api_key)"]},
                 field="api_key",
                 value="None"
             )
@@ -473,7 +477,7 @@ Focus on practical, proven patterns that match the system's requirements and con
             
             raise ValidationException(
                 message="Invalid API key format",
-                details={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"},
+                context={"expected_format": "sk-*, sk-proj-*, pplx-*, sk-ant-*, or AIza*"},
                 field="api_key",
                 value=masked_key
             )

@@ -4,7 +4,7 @@ import aiohttp
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..models.a2a_models import AgentCard, A2ATask, A2AMessage, Artifact, TaskStatus
 
@@ -94,7 +94,7 @@ class A2AClient:
                            poll_interval: float = 1.0,
                            max_wait_time: float = 300.0) -> A2ATask:
         """Wait for task completion with polling"""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         max_time = timedelta(seconds=max_wait_time)
         
         while True:
@@ -104,7 +104,7 @@ class A2AClient:
                 return task
                 
             # Check timeout
-            if datetime.utcnow() - start_time > max_time:
+            if datetime.now(timezone.utc) - start_time > max_time:
                 self.logger.warning(f"Task {task_id} timed out after {max_wait_time} seconds")
                 raise TimeoutError(f"Task {task_id} did not complete within {max_wait_time} seconds")
             

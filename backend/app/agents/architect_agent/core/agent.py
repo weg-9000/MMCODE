@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any, Dict,List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ...shared.a2a_server.server import A2AServer, TaskHandler
 from ...shared.models.a2a_models import AgentCard, A2ATask, Artifact, AgentFramework
@@ -81,7 +81,7 @@ class ArchitectAgent(A2AServer):
                 "diagrams": await self._generate_diagrams(architecture, components),
                 "decisions": await self._generate_adrs(architecture, patterns),
                 "metadata": {
-                    "design_timestamp": datetime.utcnow().isoformat(),
+                    "design_timestamp": datetime.now(timezone.utc).isoformat(),
                     "complexity_level": architecture.complexity_level,
                     "scalability_tier": architecture.scalability_tier,
                     "pattern_count": len(patterns),
@@ -101,7 +101,7 @@ class ArchitectAgent(A2AServer):
                 metadata={
                     "task_id": task.task_id,
                     "agent_id": self.agent_card.agent_id,
-                    "processing_time": (datetime.utcnow() - task.created_at).total_seconds(),
+                    "processing_time": (datetime.now(timezone.utc) - task.created_at).total_seconds(),
                     "design_approach": "pattern-driven",
                     "validation_passed": quality_score > 0.7
                 },

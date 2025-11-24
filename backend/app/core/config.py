@@ -1,7 +1,7 @@
 import os
 from typing import Optional, List, Dict, Any
-from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator, BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, BaseModel, ConfigDict
 import logging
 
 class Settings(BaseSettings):
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Basic application settings
     APP_NAME: str = "DevStrategist AI"
     APP_VERSION: str = "0.1.0"
-    DEBUG: bool = False
+    DEBUG: bool = True
 
     # API settings
     API_PREFIX: str = "/api/v1"
@@ -183,11 +183,12 @@ class Settings(BaseSettings):
         description="GitHub OAuth client secret"
     )
 
-    class Config:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), ".env")
-        env_file_encoding = "utf-8"
-        extra = "ignore" 
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=True
+    )
 
     @field_validator("SECRET_KEY")
     @classmethod
@@ -323,8 +324,7 @@ class AgentConfig(BaseModel):
             "quality_threshold": self.quality_threshold
         }
     
-    class Config:
-        frozen = True
+    model_config = ConfigDict(frozen=True)
 
 
 class AgentConfigManager:

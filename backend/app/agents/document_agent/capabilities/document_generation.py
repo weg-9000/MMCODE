@@ -3,7 +3,7 @@
 import json
 import uuid
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models.document_models import (
     GeneratedDocument, DocumentType, DocumentFormat, DocumentSection
@@ -791,7 +791,7 @@ For API support and questions:
 
 ## Document Information
 - **Version**: 1.0.0
-- **Date**: {datetime.utcnow().strftime('%Y-%m-%d')}
+- **Date**: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
 - **Status**: Draft
 
 ## Executive Summary

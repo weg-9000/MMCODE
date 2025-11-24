@@ -178,15 +178,15 @@ class ArtifactSummary(BaseModel):
 class RequirementAnalysisRequest(BaseModel):
     """Request schema for requirement analysis"""
     requirements: str = Field(..., min_length=10, description="Requirements text to analyze")
-    session_id: Optional[str] = Field(None, description="Optional session ID")
-    options: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Analysis options")
+    preferences: Optional[Dict[str, Any]] = Field(default_factory=dict, description="User preferences")
 
 
 class AnalysisResponse(BaseModel):
     """Response schema for analysis results"""
     session_id: str
     task_id: str
-    status: TaskStatus
+    status: str
+    message: Optional[str] = None
     analysis_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     processing_time: Optional[float] = None
@@ -198,17 +198,28 @@ class OrchestrationRequest(BaseModel):
     """Request schema for full agent orchestration"""
     requirements: str = Field(..., min_length=10)
     session_title: Optional[str] = Field(None, description="Session title")
-    options: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    description: Optional[str] = Field(None, description="Session description")
+    preferences: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class OrchestrationResponse(BaseModel):
     """Response schema for orchestration results"""
     session_id: str
     status: str
-    analysis: Optional[Dict[str, Any]] = None
-    coordination_plan: Optional[Dict[str, Any]] = None
-    orchestration_result: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+    progress_percentage: Optional[float] = Field(None, ge=0.0, le=100.0)
+    estimated_completion_minutes: Optional[int] = None
     tasks: List[TaskSummary] = Field(default_factory=list)
     artifacts: List[ArtifactSummary] = Field(default_factory=list)
     total_processing_time: Optional[float] = None
     overall_quality_score: Optional[float] = None
+
+
+# Workflow status enums
+class WorkflowStatus(str, Enum):
+    """Workflow execution status"""
+    STARTED = "started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"

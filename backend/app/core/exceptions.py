@@ -5,7 +5,7 @@ Provides consistent error types, formatting, and handling across all components
 
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel
 from fastapi import Request, HTTPException
@@ -75,7 +75,7 @@ class DevStrategistException(Exception):
             message=message,
             category=category,
             severity=severity,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             correlation_id=correlation_id,
             context=context or {},
             suggestions=suggestions or [],
@@ -119,12 +119,17 @@ class ValidationException(DevStrategistException):
     """Raised when input validation fails"""
     
     def __init__(self, message: str, field: str, value: Any, **kwargs):
+        # Merge contexts properly
+        base_context = {"field": field, "value": str(value)}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+        
         super().__init__(
             message=message,
             code="VALIDATION_ERROR",
             category=ErrorCategory.VALIDATION,
             severity=ErrorSeverity.LOW,
-            context={"field": field, "value": str(value)},
+            context=base_context,
             suggestions=["Check input format and try again", "Refer to API documentation"],
             **kwargs
         )
@@ -134,12 +139,17 @@ class AgentCommunicationException(DevStrategistException):
     """Raised when agent-to-agent communication fails"""
     
     def __init__(self, message: str, agent_id: str, endpoint: str, **kwargs):
+        # Merge contexts properly
+        base_context = {"agent_id": agent_id, "endpoint": endpoint}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="AGENT_COMMUNICATION_ERROR",
             category=ErrorCategory.AGENT_COMMUNICATION,
             severity=ErrorSeverity.HIGH,
-            context={"agent_id": agent_id, "endpoint": endpoint},
+            context=base_context,
             suggestions=[
                 "Check agent availability",
                 "Verify network connectivity",
@@ -154,12 +164,17 @@ class LLMServiceException(DevStrategistException):
     """Raised when LLM service operations fail"""
     
     def __init__(self, message: str, model: str, operation: str, **kwargs):
+        # Merge contexts properly
+        base_context = {"model": model, "operation": operation}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="LLM_SERVICE_ERROR",
             category=ErrorCategory.LLM_SERVICE,
             severity=ErrorSeverity.HIGH,
-            context={"model": model, "operation": operation},
+            context=base_context,
             suggestions=[
                 "Check API key validity",
                 "Verify model availability",
@@ -175,12 +190,17 @@ class ProcessingException(DevStrategistException):
     """Raised when processing operations fail"""
     
     def __init__(self, message: str, process_step: str, **kwargs):
+        # Merge contexts properly
+        base_context = {"process_step": process_step}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="PROCESSING_ERROR",
             category=ErrorCategory.PROCESSING,
             severity=ErrorSeverity.MEDIUM,
-            context={"process_step": process_step},
+            context=base_context,
             suggestions=[
                 "Review input data quality",
                 "Check processing parameters",
@@ -194,12 +214,17 @@ class DatabaseException(DevStrategistException):
     """Raised when database operations fail"""
     
     def __init__(self, message: str, operation: str, table: Optional[str] = None, **kwargs):
+        # Merge contexts properly
+        base_context = {"operation": operation, "table": table}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="DATABASE_ERROR",
             category=ErrorCategory.DATABASE,
             severity=ErrorSeverity.HIGH,
-            context={"operation": operation, "table": table},
+            context=base_context,
             suggestions=[
                 "Check database connectivity",
                 "Verify data integrity",
@@ -214,12 +239,17 @@ class ExternalServiceException(DevStrategistException):
     """Raised when external service calls fail"""
     
     def __init__(self, message: str, service: str, endpoint: str, **kwargs):
+        # Merge contexts properly
+        base_context = {"service": service, "endpoint": endpoint}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="EXTERNAL_SERVICE_ERROR",
             category=ErrorCategory.EXTERNAL_SERVICE,
             severity=ErrorSeverity.MEDIUM,
-            context={"service": service, "endpoint": endpoint},
+            context=base_context,
             suggestions=[
                 "Check service availability",
                 "Verify API credentials",
@@ -234,12 +264,17 @@ class ConfigurationException(DevStrategistException):
     """Raised when configuration errors occur"""
     
     def __init__(self, message: str, config_key: str, **kwargs):
+        # Merge contexts properly
+        base_context = {"config_key": config_key}
+        if 'context' in kwargs:
+            base_context.update(kwargs.pop('context'))
+            
         super().__init__(
             message=message,
             code="CONFIGURATION_ERROR",
             category=ErrorCategory.CONFIGURATION,
             severity=ErrorSeverity.CRITICAL,
-            context={"config_key": config_key},
+            context=base_context,
             suggestions=[
                 "Check environment variables",
                 "Verify configuration file",

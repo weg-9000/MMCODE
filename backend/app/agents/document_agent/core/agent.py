@@ -3,7 +3,7 @@
 import logging
 import uuid
 from typing import Any, Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ...shared.a2a_server.server import A2AServer, TaskHandler
 from ...shared.models.a2a_models import AgentCard, A2ATask, Artifact, AgentFramework
@@ -100,7 +100,7 @@ class DocumentAgent(A2AServer):
                     "document_types": [doc.document_type.value for doc in suite.documents],
                     "overall_quality": suite.suite_quality_score,
                     "coverage_matrix": suite.coverage_matrix,
-                    "generation_time": datetime.utcnow().isoformat()
+                    "generation_time": datetime.now(timezone.utc).isoformat()
                 }
             }
             
@@ -117,7 +117,7 @@ class DocumentAgent(A2AServer):
                     "task_id": task.task_id,
                     "agent_id": self.agent_card.agent_id,
                     "document_count": len(suite.documents),
-                    "processing_time": (datetime.utcnow() - task.created_at).total_seconds(),
+                    "processing_time": (datetime.now(timezone.utc) - task.created_at).total_seconds(),
                     "coverage_complete": all(suite.coverage_matrix.values()),
                     "formats_generated": list(set(doc.format.value for doc in suite.documents))
                 },

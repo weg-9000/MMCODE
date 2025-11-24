@@ -1,10 +1,13 @@
 # app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable
 import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -15,22 +18,13 @@ load_dotenv()
 from .core.config import settings
 from .core.exceptions import (
     DevStrategistException,
-    ValidationException,
-    AgentCommunicationException,
-    LLMServiceException,
-    ProcessingException,
     dev_strategist_exception_handler,
     validation_exception_handler,
     http_exception_handler
 )
 from .api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
-from .database.session import init_db
-from .api.routes import (
-    sessions,
-    agents,
-    knowledge,
-    auth
-)
+from .db.session import init_db, validate_db_setup
+from .core.dependencies import initialize_agents, cleanup_agents
 
 # Logging configuration
 logging.basicConfig(
@@ -48,7 +42,6 @@ async def lifespan(app: FastAPI):
     
     # Database initialization
     try:
-        from .database.session import validate_db_setup
         db_validation = await validate_db_setup()
         if not db_validation:
             logger.error("Database setup validation failed")
@@ -58,16 +51,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database initialization failed: {str(e)}")
     
-    # Initialize schedulers
-    scheduler = None
+    # Initialize agent registry
     try:
-        from .workers.crawl_scheduler import init_scheduler
-        scheduler = init_scheduler()
-        if scheduler and not scheduler.running:
-            scheduler.start()
-            logger.info("Crawl scheduler started")
+        await initialize_agents()
+        logger.info("Agent registry initialized successfully")
     except Exception as e:
-        logger.error(f"Scheduler initialization failed: {str(e)}")
+        logger.error(f"Agent initialization failed: {str(e)}")
     
     logger.info("Application startup completed")
     
@@ -77,21 +66,21 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutting down...")
     
     try:
-        if scheduler and scheduler.running:
-            scheduler.shutdown()
-            logger.info("Scheduler shutdown completed")
+        # Cleanup agents and connections
+        await cleanup_agents()
+        logger.info("Agent cleanup completed")
     except Exception as e:
-        logger.error(f"Scheduler shutdown error: {str(e)}")
+        logger.error(f"Agent cleanup error: {str(e)}")
     
     logger.info("Application shutdown completed")
 
 app = FastAPI(
-    title="DevStrategist AI API",
-    version="0.1.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
     debug=settings.DEBUG,
-    description="AI-powered development strategy automation platform",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    description="AI-powered development strategy automation platform with agent orchestration",
+    docs_url=None,  # Using custom /docs endpoint with proper CSP
+    redoc_url="/redoc" if settings.DEBUG else None,
     openapi_url="/openapi.json",
     lifespan=lifespan
 )
@@ -106,7 +95,7 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# Security middleware
+
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -117,17 +106,28 @@ app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 
 @app.get("/")
 async def root():
+    """Root endpoint with API information and documentation links"""
+    documentation_links = {}
+    if settings.DEBUG:
+        documentation_links = {
+            "swagger_ui": "/docs",
+            "redoc": "/redoc",
+            "openapi_schema": "/openapi.json"
+        }
+    
     return {
-        "message": "DevStrategist AI API",
-        "version": "0.1.0",
+        "message": f"Welcome to {settings.APP_NAME} API",
+        "version": settings.APP_VERSION,
         "status": "running",
+        "api_base": settings.API_PREFIX,
+        "documentation": documentation_links,
         "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/health")
 async def health_check():
     try:
-        from .database.session import AsyncSessionLocal
+        from .db.session import AsyncSessionLocal
         from sqlalchemy import text
         async with AsyncSessionLocal() as db:
             await db.execute(text("SELECT 1"))
@@ -142,18 +142,54 @@ async def health_check():
     }
 
 # API router registration
-api_prefix = settings.API_PREFIX
-app.include_router(sessions.router, prefix=api_prefix, tags=["sessions"])
-app.include_router(agents.router, prefix=api_prefix, tags=["agents"])
-app.include_router(knowledge.router, prefix=api_prefix, tags=["knowledge"])
-app.include_router(auth.router, prefix=api_prefix, tags=["authentication"])
+from app.api.v1 import sessions, agents, orchestration, a2a
+
+app.include_router(sessions.router, prefix=f"{settings.API_PREFIX}/sessions", tags=["sessions"])
+app.include_router(agents.router, prefix=f"{settings.API_PREFIX}/agents", tags=["agents"])
+app.include_router(orchestration.router, prefix=f"{settings.API_PREFIX}/orchestrate", tags=["orchestration"])
+app.include_router(a2a.router, prefix=f"{settings.API_PREFIX}/a2a", tags=["a2a_communication"])
+
+if settings.DEBUG:
+    from fastapi.openapi.docs import get_swagger_ui_html
+    
+    @app.get("/docs", include_in_schema=False)
+    async def custom_swagger_ui_html():
+        """Custom Swagger UI with explicit CSP headers for CDN resources"""
+        logger.info("Serving custom Swagger UI with permissive CSP")
+        
+        # 1) 이 함수는 이미 HTMLResponse 객체를 반환함
+        response = get_swagger_ui_html(
+            openapi_url=app.openapi_url,
+            title=f"{app.title} - Swagger UI",
+            oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        )
+        
+        # 2) 반환된 response 는 그대로 사용하고, 여기에 헤더만 추가
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net blob:; "
+            "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net blob:; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "style-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "img-src 'self' data: https://fastapi.tiangolo.com https://cdn.jsdelivr.net blob:; "
+            "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            "connect-src 'self' https://cdn.jsdelivr.net blob:; "
+            "worker-src 'self' blob:;"
+        )
+        
+        logger.debug("Applied enhanced CSP policy for Swagger UI with element directives")
+        return response
+
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8080,
         reload=True,
         log_level="info"
     )

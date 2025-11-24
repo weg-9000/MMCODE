@@ -4,8 +4,8 @@ Defines standard A2A protocol structures for task handling.
 """
 
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -77,12 +77,9 @@ class TaskArtifact(BaseModel):
     content: Dict[str, Any] = Field(..., description="Artifact content")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Artifact metadata")
     format: str = Field(default="json", description="Content format")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class A2ATask(BaseModel):
@@ -95,13 +92,10 @@ class A2ATask(BaseModel):
     timeout: Optional[int] = Field(300, description="Timeout in seconds")
     retry_count: int = Field(default=0, description="Current retry count")
     max_retries: int = Field(default=3, description="Maximum retry attempts")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_by: str = Field(..., description="Creator agent/user ID")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class A2ATaskUpdate(BaseModel):
@@ -111,12 +105,9 @@ class A2ATaskUpdate(BaseModel):
     progress: Optional[TaskProgress] = Field(None, description="Progress information")
     error: Optional[TaskError] = Field(None, description="Error information if failed")
     message: Optional[str] = Field(None, description="Status message")
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class A2ATaskResult(BaseModel):
@@ -127,12 +118,9 @@ class A2ATaskResult(BaseModel):
     execution_time: float = Field(..., description="Execution time in seconds")
     resource_usage: Optional[Dict[str, float]] = Field(None, description="Resource consumption metrics")
     quality_metrics: Optional[Dict[str, float]] = Field(None, description="Quality assessment")
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class StackRecommendationRequest(BaseModel):

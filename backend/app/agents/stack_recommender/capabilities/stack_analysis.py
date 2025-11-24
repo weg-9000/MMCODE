@@ -36,6 +36,10 @@ class StackAnalysisEngine:
 
     def _initialize_llm(self):
         """Initialize LLM with unified provider system and fallback compatibility"""
+        # Use lazy initialization pattern to avoid event loop conflicts
+        self.llm = None
+        self._llm_manager = None
+        
         try:
             # Modern: Try to use unified LLM provider system
             from app.core.llm_providers import DevStrategistLLMManager
@@ -43,7 +47,7 @@ class StackAnalysisEngine:
             
             # Check if we have unified LLM configuration
             if hasattr(global_settings, 'LLM_API_KEY') and global_settings.LLM_API_KEY:
-                llm_manager = DevStrategistLLMManager(
+                self._llm_manager = DevStrategistLLMManager(
                     api_key=global_settings.LLM_API_KEY,
                     provider_name=getattr(global_settings, 'LLM_PROVIDER', None),
                     model=getattr(global_settings, 'LLM_MODEL', None),
@@ -51,19 +55,7 @@ class StackAnalysisEngine:
                     max_tokens=getattr(global_settings, 'LLM_MAX_TOKENS', settings.openai_max_tokens),
                     timeout=getattr(global_settings, 'LLM_TIMEOUT', 30)
                 )
-                
-                # Get LLM instance synchronously
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
-                except RuntimeError:
-                    # If no event loop, create one
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
-                    
-                logger.info("LLM initialized with unified provider system")
+                logger.info("LLM manager prepared for lazy initialization")
                 return
                 
         except Exception as e:
@@ -77,6 +69,29 @@ class StackAnalysisEngine:
             openai_api_key=settings.effective_api_key
         )
         logger.info(f"LLM initialized with settings-based configuration: model={settings.effective_model}, provider=OpenAI")
+    
+    async def _ensure_llm(self):
+        """Ensure LLM is initialized (lazy initialization)"""
+        if self.llm is None and self._llm_manager is not None:
+            try:
+                self.llm = await self._llm_manager.get_llm_instance()
+                logger.info("LLM initialized with unified provider system")
+            except Exception as e:
+                logger.warning(f"Failed to get LLM instance, falling back to settings: {e}")
+                self.llm = ChatOpenAI(
+                    model=settings.effective_model,
+                    temperature=settings.effective_temperature,
+                    max_tokens=settings.effective_max_tokens,
+                    openai_api_key=settings.effective_api_key
+                )
+        elif self.llm is None:
+            # Final fallback
+            self.llm = ChatOpenAI(
+                model=settings.effective_model,
+                temperature=settings.effective_temperature,
+                max_tokens=settings.effective_max_tokens,
+                openai_api_key=settings.effective_api_key
+            )
     
     def _setup_prompts(self):
         """Setup LangChain prompts for stack analysis"""
@@ -223,6 +238,9 @@ Return the refined recommendation in the same JSON format.
     ) -> StackRecommendation:
         """Generate initial technology stack recommendation using LLM"""
         
+        # Ensure LLM is initialized
+        await self._ensure_llm()
+        
         # Format inputs
         knowledge_text = self._format_knowledge_insights(knowledge_insights)
         template_text = self._format_template_suggestions(templates)
@@ -263,6 +281,9 @@ Return the refined recommendation in the same JSON format.
         
         if not validation_concerns:
             return recommendation
+        
+        # Ensure LLM is initialized for refinement
+        await self._ensure_llm()
         
         # Refine recommendation
         refinement_vars = {

@@ -1,7 +1,7 @@
 """Quality Assessment - Document quality evaluation and scoring"""
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models.document_models import GeneratedDocument, DocumentationSuite, DocumentType
 
@@ -94,7 +94,7 @@ class QualityAssessment:
             "coverage_analysis": coverage_analysis,
             "recommendations": recommendations,
             "quality_level": quality_level,
-            "assessment_timestamp": datetime.utcnow().isoformat(),
+            "assessment_timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics_breakdown": {
                 "avg_completeness": sum(doc.completeness_score for doc in suite.documents) / len(suite.documents),
                 "avg_accuracy": sum(doc.accuracy_score for doc in suite.documents) / len(suite.documents),

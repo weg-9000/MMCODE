@@ -4,7 +4,8 @@ Manages environment variables, default values, and validation.
 """
 from pydantic_settings import BaseSettings
 from typing import Dict, List, Optional
-from pydantic import Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import SettingsConfigDict
 import os
 
 class ArchitectAgentSettings(BaseSettings):
@@ -22,18 +23,18 @@ class ArchitectAgentSettings(BaseSettings):
     a2a_server_host: str = Field(default="localhost", description="A2A server host")
     a2a_server_port: int = Field(default=8081, description="A2A server port") 
     a2a_auth_type: str = Field(default="OAuth2", description="Authentication type")
-    a2a_auth_token: Optional[str] = Field(None, description="Authentication token", env="A2A_AUTH_TOKEN")
+    a2a_auth_token: Optional[str] = Field(None, description="Authentication token", alias="A2A_AUTH_TOKEN")
     
     # Unified LLM Configuration (Primary)
-    llm_api_key: Optional[str] = Field(default=None, description="Unified LLM API key", env="LLM_API_KEY")
-    llm_provider: Optional[str] = Field(default=None, description="LLM provider", env="LLM_PROVIDER")
-    llm_model: Optional[str] = Field(default=None, description="LLM model", env="LLM_MODEL")
-    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="LLM temperature", env="LLM_TEMPERATURE")
-    llm_max_tokens: int = Field(default=3000, description="Maximum tokens", env="LLM_MAX_TOKENS")
-    llm_timeout: int = Field(default=45, description="LLM timeout", env="LLM_TIMEOUT")
+    llm_api_key: Optional[str] = Field(default=None, description="Unified LLM API key", alias="LLM_API_KEY")
+    llm_provider: Optional[str] = Field(default=None, description="LLM provider", alias="LLM_PROVIDER")
+    llm_model: Optional[str] = Field(default=None, description="LLM model", alias="LLM_MODEL")
+    llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="LLM temperature", alias="LLM_TEMPERATURE")
+    llm_max_tokens: int = Field(default=3000, description="Maximum tokens", alias="LLM_MAX_TOKENS")
+    llm_timeout: int = Field(default=45, description="LLM timeout", alias="LLM_TIMEOUT")
     
     # Legacy LLM Configuration (Backward Compatibility)
-    openai_api_key: Optional[str] = Field(default=None, description="Legacy OpenAI API key", env="OPENAI_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None, description="Legacy OpenAI API key", alias="OPENAI_API_KEY")
     openai_model: Optional[str] = Field(default=None, description="Legacy OpenAI model")
     openai_temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0, description="Legacy LLM temperature")
     openai_max_tokens: Optional[int] = Field(default=None, description="Legacy maximum tokens")
@@ -60,11 +61,11 @@ class ArchitectAgentSettings(BaseSettings):
         return self.llm_max_tokens if self.llm_max_tokens is not None else (self.openai_max_tokens or 3000)
     
     # Database Configuration  
-    supabase_url: str = Field(..., description="Supabase URL", env="SUPABASE_URL")
-    supabase_key: str = Field(..., description="Supabase API key", env="SUPABASE_KEY")
+    supabase_url: str = Field(..., description="Supabase URL", alias="SUPABASE_URL")
+    supabase_key: str = Field(..., description="Supabase API key", alias="SUPABASE_KEY")
     
     # Redis Configuration
-    redis_url: str = Field(default="redis://localhost:6379", description="Redis URL", env="REDIS_URL")
+    redis_url: str = Field(default="redis://localhost:6379", description="Redis URL", alias="REDIS_URL")
     redis_task_ttl: int = Field(default=3600, description="Task TTL in seconds")
     
     # pgvector Search Configuration
@@ -106,7 +107,8 @@ class ArchitectAgentSettings(BaseSettings):
     enable_tracing: bool = Field(default=True, description="Enable distributed tracing")
     log_level: str = Field(default="INFO", description="Logging level")
     
-    @validator('quality_thresholds')
+    @field_validator('quality_thresholds')
+    @classmethod
     def validate_quality_thresholds(cls, v):
         """Validate all quality thresholds are between 0 and 1"""
         for key, value in v.items():
@@ -114,7 +116,8 @@ class ArchitectAgentSettings(BaseSettings):
                 raise ValueError(f"Quality threshold {key} must be between 0.0 and 1.0")
         return v
     
-    @validator('openai_temperature')
+    @field_validator('openai_temperature')
+    @classmethod
     def validate_temperature(cls, v):
         if v is not None:
             return round(v, 2)
@@ -161,10 +164,12 @@ class ArchitectAgentSettings(BaseSettings):
             }
         }
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True
+    )
 
 
 # Global settings instance

@@ -1,6 +1,6 @@
 """Configuration settings for Requirement Analyzer Agent"""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Dict, Any, Optional
 
 
@@ -49,10 +49,11 @@ class RequirementAnalyzerSettings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
-    class Config:
-        env_file = ".env"
-        env_prefix = "REQ_ANALYZER_"
-        extra = "ignore"  
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="REQ_ANALYZER_",
+        extra="ignore"
+    )  
 
 
 def get_agent_config() -> Dict[str, Any]:

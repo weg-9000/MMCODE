@@ -82,9 +82,10 @@ async def init_db():
 async def validate_db_setup() -> bool:
     """Validate database setup and connectivity"""
     try:
+        from sqlalchemy import text
         async with engine.begin() as conn:
             # Simple connectivity test
-            result = await conn.execute("SELECT 1")
+            result = await conn.execute(text("SELECT 1"))
             logger.info("Database connectivity validated")
             return True
     except Exception as e:

@@ -4,7 +4,7 @@ Handles task reception, processing, and response generation.
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import uuid
 
@@ -111,7 +111,7 @@ class StackRecommenderAgent(A2AServer):
                     ]
                 },
                 "metadata": {
-                    "analysis_timestamp": datetime.utcnow().isoformat(),
+                    "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
                     "agent_version": self.agent_card.version,
                     "complexity_assessment": "medium",
                     "confidence_level": quality_score.overall_score
@@ -127,7 +127,7 @@ class StackRecommenderAgent(A2AServer):
                 metadata={
                     "task_id": task.task_id,
                     "agent_id": self.agent_card.agent_id,
-                    "processing_time": (datetime.utcnow() - task.created_at).total_seconds(),
+                    "processing_time": (datetime.now(timezone.utc) - task.created_at).total_seconds(),
                     "recommendation_confidence": quality_score.overall_score,
                     "technology_count": len(stack_result["recommendation"]) if isinstance(stack_result["recommendation"], dict) else 0
                 },

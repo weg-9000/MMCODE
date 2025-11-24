@@ -3,12 +3,13 @@ Session management API endpoints
 CRUD operations for user sessions and requirement analysis workflows
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import logging
-
+from datetime import datetime, timezone
+from app.agents.shared.a2a_client.mock_client import InMemoryA2AClient
 from app.db.session import get_db
 from app.models.models import Session, Task, Artifact
 from app.schemas.session import (
@@ -205,9 +206,10 @@ async def delete_session(
 async def analyze_requirements(
     session_id: str,
     analysis_request: RequirementAnalysisRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """Analyze requirements for a session"""
+    """Analyze requirements for a session using RequirementAnalyzer agent"""
     try:
         # Verify session exists
         result = await db.execute(select(Session).where(Session.id == session_id))
@@ -216,15 +218,21 @@ async def analyze_requirements(
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # TODO: Integrate with RequirementAnalyzer agent
-        # For now, return a placeholder response
+        # Update session with requirements if provided
+        if analysis_request.requirements:
+            session.requirements_text = analysis_request.requirements
+            session.status = "processing"
+            await db.commit()
         
         # Create task record
         task = Task(
             session_id=session_id,
             agent_id="requirement-analyzer",
             task_type="requirement_analysis",
-            input_data={"requirements": analysis_request.requirements},
+            input_data={
+                "requirements": analysis_request.requirements or session.requirements_text,
+                "preferences": analysis_request.preferences or {}
+            },
             status="pending"
         )
         
@@ -232,12 +240,22 @@ async def analyze_requirements(
         await db.commit()
         await db.refresh(task)
         
-        logger.info(f"Created analysis task {task.id} for session {session_id}")
+        # Schedule background analysis using RequirementAnalyzer
+        background_tasks.add_task(
+            _execute_requirement_analysis,
+            session_id,
+            task.id,
+            analysis_request.requirements or session.requirements_text or "",
+            analysis_request.preferences or {}
+        )
+        
+        logger.info(f"Started requirement analysis task {task.id} for session {session_id}")
         
         return AnalysisResponse(
             session_id=session_id,
             task_id=task.id,
-            status="pending"
+            status="processing",
+            message="Requirement analysis started successfully"
         )
         
     except HTTPException:
@@ -251,6 +269,7 @@ async def analyze_requirements(
 @router.post("/orchestrate", response_model=OrchestrationResponse)
 async def orchestrate_full_workflow(
     orchestration_request: OrchestrationRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Start full agent orchestration workflow"""
@@ -259,21 +278,29 @@ async def orchestrate_full_workflow(
         session = Session(
             title=orchestration_request.session_title or "AI Strategy Session",
             description="Full agent orchestration workflow",
-            requirements_text=orchestration_request.requirements
+            requirements_text=orchestration_request.requirements,
+            status="processing"
         )
         
         db.add(session)
         await db.commit()
         await db.refresh(session)
         
-        # TODO: Integrate with RequirementAnalyzer orchestration
-        # For now, return a placeholder response
+        # Schedule full orchestration workflow
+        background_tasks.add_task(
+            _execute_full_orchestration,
+            session.id,
+            orchestration_request.requirements,
+            orchestration_request.preferences or {}
+        )
         
-        logger.info(f"Started orchestration for session {session.id}")
+        logger.info(f"Started full orchestration workflow for session {session.id}")
         
         return OrchestrationResponse(
             session_id=session.id,
-            status="started",
+            status="processing",
+            message="Full orchestration workflow initiated",
+            estimated_completion_minutes=15,
             tasks=[],
             artifacts=[]
         )
@@ -282,3 +309,221 @@ async def orchestrate_full_workflow(
         logger.error(f"Failed to start orchestration: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to start orchestration")
+
+
+# Background execution functions
+async def _execute_requirement_analysis(
+    session_id: str,
+    task_id: str,
+    requirements: str,
+    preferences: Dict[str, Any]
+):
+    """Background task for requirement analysis execution"""
+    from app.db.session import AsyncSessionLocal
+    from app.agents.requirement_analyzer.core.agent import RequirementAnalyzer
+    from app.agents.shared.a2a_client.mock_client import InMemoryA2AClient
+    
+    try:
+        # Initialize analyzer
+        a2a_client = InMemoryA2AClient()
+        analyzer = RequirementAnalyzer(a2a_client=a2a_client)
+        
+        # Execute analysis
+        result = await analyzer.analyze_requirements(requirements)
+        
+        # Update database
+        async with AsyncSessionLocal() as db:
+            # Update task
+            task_result = await db.execute(select(Task).where(Task.id == task_id))
+            task = task_result.scalar_one_or_none()
+            
+            if task:
+                task.status = "completed"
+                task.completed_at = datetime.now(timezone.utc)
+                task.output_data = result
+                
+                # Calculate processing time
+                if task.started_at:
+                    processing_time = (datetime.now(timezone.utc) - task.started_at).total_seconds()
+                    task.processing_time = processing_time
+                
+                # Create artifact for analysis result
+                artifact = Artifact(
+                    session_id=session_id,
+                    task_id=task_id,
+                    artifact_type="requirement_analysis",
+                    title="Requirement Analysis Report",
+                    content=result,
+                    created_by="requirement-analyzer",
+                    is_final=True
+                )
+                
+                db.add(artifact)
+                await db.commit()
+                
+                logger.info(f"Requirement analysis completed for session {session_id}")
+        
+    except Exception as e:
+        logger.error(f"Requirement analysis failed for session {session_id}: {e}")
+        
+        # Update task status to failed
+        try:
+            async with AsyncSessionLocal() as db:
+                task_result = await db.execute(select(Task).where(Task.id == task_id))
+                task = task_result.scalar_one_or_none()
+                
+                if task:
+                    task.status = "failed"
+                    task.error_message = str(e)
+                    task.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to update task status: {db_error}")
+
+
+async def _execute_full_orchestration(
+    session_id: str,
+    requirements: str,
+    preferences: Dict[str, Any]
+):
+    """Background task for full orchestration workflow execution"""
+    from app.db.session import AsyncSessionLocal
+    from app.agents.requirement_analyzer.core.agent import RequirementAnalyzer
+    from app.agents.shared.a2a_client.mock_client import InMemoryA2AClient
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            # Update session status
+            session_result = await db.execute(select(Session).where(Session.id == session_id))
+            session = session_result.scalar_one_or_none()
+            
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return
+            
+            # Initialize orchestration components
+            a2a_client = InMemoryA2AClient()
+            analyzer = RequirementAnalyzer(a2a_client=a2a_client)
+            
+            # Register agents with the client (simulate agent registration)
+            await _register_test_agents(a2a_client)
+            
+            # Execute full orchestration
+            orchestration_result = await analyzer.analyze_and_orchestrate(
+                requirements=requirements,
+                session_id=session_id
+            )
+            
+            # Save orchestration results
+            await _save_orchestration_results(db, session_id, orchestration_result)
+            
+            # Update session status
+            session.status = "completed"
+            await db.commit()
+            
+            logger.info(f"Full orchestration completed for session {session_id}")
+            
+    except Exception as e:
+        logger.error(f"Full orchestration failed for session {session_id}: {e}")
+        
+        # Update session status to failed
+        try:
+            async with AsyncSessionLocal() as db:
+                session_result = await db.execute(select(Session).where(Session.id == session_id))
+                session = session_result.scalar_one_or_none()
+                
+                if session:
+                    session.status = "failed"
+                    await db.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to update session status: {db_error}")
+
+
+async def _register_test_agents(client: InMemoryA2AClient):
+    """Register test agents for orchestration"""
+    try:
+        # Import agent classes
+        from app.agents.architect_agent.core.agent import ArchitectAgent
+        from app.agents.stack_recommender.core.agent import StackRecommenderAgent
+        from app.agents.document_agent.core.agent import DocumentAgent
+        
+        # Create and register agent instances
+        architect = ArchitectAgent()
+        stack_recommender = StackRecommenderAgent() 
+        documenter = DocumentAgent()
+        
+        client.register("architect", architect)
+        client.register("stack_recommender", stack_recommender)
+        client.register("documenter", documenter)
+        
+        logger.info("Test agents registered successfully")
+        
+    except Exception as e:
+        logger.warning(f"Failed to register some agents: {e}")
+
+
+async def _save_orchestration_results(
+    db: AsyncSession,
+    session_id: str,
+    results: Dict[str, Any]
+):
+    """Save orchestration results as artifacts"""
+    try:
+        artifacts_created = 0
+        
+        # Save different types of results as separate artifacts
+        if "analysis" in results:
+            analysis_artifact = Artifact(
+                session_id=session_id,
+                artifact_type="requirement_analysis",
+                title="Requirements Analysis",
+                content=results["analysis"],
+                created_by="requirement-analyzer",
+                is_final=True
+            )
+            db.add(analysis_artifact)
+            artifacts_created += 1
+        
+        if "architecture" in results:
+            arch_artifact = Artifact(
+                session_id=session_id,
+                artifact_type="architecture_design",
+                title="System Architecture Design",
+                content=results["architecture"],
+                created_by="architect",
+                is_final=True
+            )
+            db.add(arch_artifact)
+            artifacts_created += 1
+        
+        if "stack" in results:
+            stack_artifact = Artifact(
+                session_id=session_id,
+                artifact_type="stack_recommendation",
+                title="Technology Stack Recommendation",
+                content=results["stack"],
+                created_by="stack-recommender",
+                is_final=True
+            )
+            db.add(stack_artifact)
+            artifacts_created += 1
+        
+        if "documentation" in results:
+            doc_artifact = Artifact(
+                session_id=session_id,
+                artifact_type="documentation",
+                title="Project Documentation",
+                content=results["documentation"],
+                created_by="documenter",
+                is_final=True
+            )
+            db.add(doc_artifact)
+            artifacts_created += 1
+        
+        await db.commit()
+        logger.info(f"Saved {artifacts_created} artifacts for session {session_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save orchestration results: {e}")
+        await db.rollback()
+        raise

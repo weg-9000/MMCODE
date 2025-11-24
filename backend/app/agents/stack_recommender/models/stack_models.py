@@ -4,9 +4,9 @@ Defines Pydantic models for stack recommendations, quality assessment, and artif
 """
 
 from typing import Dict, List, Optional, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class StackCategory(str, Enum):
@@ -37,7 +37,8 @@ class TechnologyChoice(BaseModel):
     alternatives: List[str] = Field(default_factory=list, description="Alternative options")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
     
-    @validator('confidence')
+    @field_validator('confidence')
+    @classmethod
     def validate_confidence(cls, v):
         return round(v, 2)
 
@@ -51,7 +52,8 @@ class StackRecommendation(BaseModel):
     devops: List[TechnologyChoice] = Field(default_factory=list)
     monitoring: List[TechnologyChoice] = Field(default_factory=list)
     
-    @validator('*', pre=True)
+    @field_validator('*', mode='before')
+    @classmethod
     def ensure_lists(cls, v):
         return v if isinstance(v, list) else [v] if v else []
 
@@ -79,7 +81,8 @@ class QualityScore(BaseModel):
             for attr, weight in weights.items()
         ), 2)
     
-    @validator('*')
+    @field_validator('*')
+    @classmethod
     def validate_scores(cls, v):
         return round(v, 2)
 
@@ -103,12 +106,9 @@ class StackArtifact(BaseModel):
     cost_estimate: Optional[Dict[str, float]] = Field(None, description="Cost projections")
     risk_assessment: List[str] = Field(default_factory=list, description="Risk factors")
     next_steps: List[str] = Field(default_factory=list, description="Action items")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class StackTemplate(BaseModel):

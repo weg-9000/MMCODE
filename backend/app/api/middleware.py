@@ -4,7 +4,7 @@ Logging, security, and request processing middleware
 """
 
 from fastapi import Request, Response
-from fastapi.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
 import logging
 import time
@@ -78,24 +78,52 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Middleware for adding security headers"""
+    """Middleware for adding security headers with path-based CSP logic"""
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         response = await call_next(request)
-        
-        # Add security headers
+        import os
+        middleware_file_path = os.path.abspath(__file__)
+        logger.info(f"[MIDDLEWARE-FILE] {middleware_file_path}")
+        logger.info(f"[REQUEST-PATH] {request.url.path}")
+        path = request.url.path
+        # 공통 보안 헤더
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self' https:; "
-            "connect-src 'self' https:;"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # Enhanced protection headers
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), "
+            "payment=(), usb=(), magnetometer=(), gyroscope=()"
         )
+        
+        if path.startswith(("/docs", "/redoc", "/openapi.json")):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net blob:; "
+                "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net blob:; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+                "style-src-elem 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+                "img-src 'self' data: https://fastapi.tiangolo.com https://cdn.jsdelivr.net blob:; "
+                "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+                "connect-src 'self' https://cdn.jsdelivr.net blob:; "
+                "worker-src 'self' blob:;"
+            )
+            logger.debug(f"Applied Swagger CSP for {path}")
+        else:
+            # 일반 API용 엄격한 CSP
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self' data:; "
+                "connect-src 'self' https:;"
+            )
+            logger.debug(f"Applied strict CSP for {path}")
         
         return response
 

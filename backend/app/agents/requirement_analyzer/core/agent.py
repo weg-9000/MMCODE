@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ...shared.a2a_client.client import A2AClient
 from ...shared.models.a2a_models import AgentCard, A2ATask, Artifact, AgentFramework
@@ -69,7 +69,7 @@ class RequirementAnalyzer:
                 "coordination_plan": coordination_plan.to_dict(),
                 "orchestration_result": orchestration_result,
                 "status": "completed",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -78,7 +78,7 @@ class RequirementAnalyzer:
                 "session_id": session_id,
                 "status": "failed",
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     async def analyze_requirements_only(self, requirements: str) -> AnalysisResult:

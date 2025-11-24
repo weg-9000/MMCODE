@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ...shared.a2a_client.client import A2AClient
 from ...shared.models.a2a_models import A2ATask, TaskStatus
@@ -30,7 +30,7 @@ class AgentCoordinator:
         """
         self.logger.info(f"Executing coordination plan {plan.plan_id}")
         
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         result = OrchestrationResult(plan_id=plan.plan_id)
         
         try:
@@ -41,7 +41,7 @@ class AgentCoordinator:
                 await self._execute_sequential(plan, agent_endpoints, a2a_client, result)
             
             # Calculate execution time
-            result.total_execution_time = (datetime.utcnow() - start_time).total_seconds()
+            result.total_execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             
             # Determine overall status
             if result.failed_tasks:
@@ -61,7 +61,7 @@ class AgentCoordinator:
         except Exception as e:
             self.logger.error(f"Orchestration failed for plan {plan.plan_id}: {e}")
             result.status = "failed"
-            result.total_execution_time = (datetime.utcnow() - start_time).total_seconds()
+            result.total_execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             return result.to_dict()
     
     async def _execute_parallel(self, 
@@ -180,7 +180,11 @@ class AgentCoordinator:
         
         agent_url = agent_endpoints[agent_name]
         
-        self.logger.info(f"Executing task {task.task_id} on agent {agent_name}")
+        self.logger.info(f"Executing task {task.task_id} on agent {agent_name} at URL {agent_url}")
+        
+        # Debug logging for A2A communication
+        if hasattr(a2a_client, '_agents'):
+            self.logger.info(f"Available agents in mock client: {list(a2a_client._agents.keys())}")
         
         try:
             # Create and wait for task completion
