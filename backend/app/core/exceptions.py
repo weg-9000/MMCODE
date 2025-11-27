@@ -235,6 +235,25 @@ class DatabaseException(DevStrategistException):
         )
 
 
+class DatabaseConnectionError(DatabaseException):
+    """Raised when database connection fails"""
+    
+    def __init__(self, message: str = "Database connection failed", **kwargs):
+        super().__init__(
+            message=message,
+            operation="connection",
+            code="DATABASE_CONNECTION_ERROR",
+            severity=ErrorSeverity.CRITICAL,
+            suggestions=[
+                "Check database server status",
+                "Verify connection parameters",
+                "Check network connectivity",
+                "Review database credentials"
+            ],
+            **kwargs
+        )
+
+
 class ExternalServiceException(DevStrategistException):
     """Raised when external service calls fail"""
     

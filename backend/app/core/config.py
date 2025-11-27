@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     )
     SUPABASE_KEY: str = Field(
         ...,
+        repr=False,
         description="Supabase API key"
     )
     
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     # Multi-Provider LLM Configuration (Primary)
     LLM_API_KEY: str = Field(
         ..., 
+        repr=False,
         description="LLM API key (auto-detects provider from key format)"
     )
     LLM_PROVIDER: Optional[str] = Field(
@@ -70,6 +72,7 @@ class Settings(BaseSettings):
     # Legacy LLM Configuration (Backward Compatibility)
     OPENAI_API_KEY: Optional[str] = Field(
         default=None,
+        repr=False,
         description="Legacy OpenAI API key (mapped from LLM_API_KEY)"
     )
     OPENAI_MODEL: Optional[str] = Field(
@@ -111,6 +114,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = Field(
         ...,
+        repr=False,
         min_length=32,
         description="Secret key for session encryption"
     )
@@ -180,6 +184,7 @@ class Settings(BaseSettings):
     )
     GITHUB_CLIENT_SECRET: Optional[str] = Field(
         default=None,
+        repr=False,
         description="GitHub OAuth client secret"
     )
 

@@ -19,6 +19,10 @@ from app.schemas.session import (
     WorkflowStatus, TaskSummary
 )
 from app.agents.shared.a2a_client.mock_client import InMemoryA2AClient
+from app.core.exceptions import (
+    DevStrategistException, DatabaseConnectionError, 
+    AgentCommunicationException, ValidationException
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,9 +72,12 @@ async def start_orchestration(
         if missing_agents:
             session.status = "failed"
             await db.commit()
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Required agents not available: {missing_agents}"
+            raise ValidationException(
+                message="Required agents not available",
+                field="required_agents",
+                value=missing_agents,
+                context={"missing_agents": missing_agents},
+                suggestions=["Start missing agents", "Check agent configuration"]
             )
         
         # Schedule background orchestration
@@ -92,12 +99,23 @@ async def start_orchestration(
             artifacts=[]
         )
         
-    except HTTPException:
+    except DevStrategistException:
+        await db.rollback()
         raise
     except Exception as e:
-        logger.error(f"Failed to start orchestration: {e}")
+        logger.exception("Unexpected error starting orchestration", 
+                       extra={"session_id": getattr(session, 'id', None) if 'session' in locals() else None})
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Orchestration startup failed: {str(e)}")
+        raise DevStrategistException(
+            message="Failed to start orchestration workflow",
+            code="ORCHESTRATION_START_ERROR",
+            context={"original_error": str(e)},
+            suggestions=[
+                "Check database connectivity", 
+                "Verify agent availability",
+                "Review system logs"
+            ]
+        )
 
 
 @router.get("/{session_id}/status", response_model=OrchestrationResponse)
@@ -329,8 +347,8 @@ async def _execute_orchestration_workflow(
     from app.agents.requirement_analyzer.analyzer import RequirementAnalyzer
     
     try:
+        # Step 1: Initialize and update session status (short DB session)
         async with AsyncSessionLocal() as db:
-            # Update session status
             result = await db.execute(select(DBSession).where(DBSession.id == session_id))
             session = result.scalar_one_or_none()
             
@@ -340,33 +358,39 @@ async def _execute_orchestration_workflow(
             
             session.status = "processing"
             await db.commit()
-            
-            # Initialize orchestration client and analyzer
-            client = get_orchestration_client()
-            analyzer = RequirementAnalyzer(a2a_client=client)
-            
-            # Register agents (this should be done during app startup)
+        
+        # Step 2: Execute long-running AI workflow (no DB connection)
+        client = get_orchestration_client()
+        analyzer = RequirementAnalyzer(a2a_client=client)
+        
+        # Register agents (quick operation)
+        async with AsyncSessionLocal() as db:
             await _ensure_agents_registered(client, db)
-            
-            # Execute workflow
-            result = await analyzer.analyze_and_orchestrate(
-                requirements=requirements,
-                session_id=session_id
-            )
-            
+        
+        # Execute the AI workflow without holding DB connection
+        workflow_result = await analyzer.analyze_and_orchestrate(
+            requirements=requirements,
+            session_id=session_id
+        )
+        
+        # Step 3: Save results and update status (short DB session)
+        async with AsyncSessionLocal() as db:
             # Save results to database
-            await _save_orchestration_results(db, session_id, result)
+            await _save_orchestration_results(db, session_id, workflow_result)
             
             # Update session status
-            session.status = "completed"
-            await db.commit()
-            
-            logger.info(f"Orchestration workflow completed for session {session_id}")
-            
-    except Exception as e:
-        logger.error(f"Orchestration workflow failed for {session_id}: {e}")
+            result = await db.execute(select(DBSession).where(DBSession.id == session_id))
+            session = result.scalar_one_or_none()
+            if session:
+                session.status = "completed"
+                await db.commit()
         
-        # Update session status to failed
+        logger.info(f"Orchestration workflow completed for session {session_id}")
+        
+    except Exception as e:
+        logger.exception(f"Orchestration workflow failed for {session_id}")
+        
+        # Update session status to failed (separate short DB session)
         try:
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(DBSession).where(DBSession.id == session_id))

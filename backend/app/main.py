@@ -26,11 +26,16 @@ from .api.middleware import LoggingMiddleware, SecurityHeadersMiddleware
 from .db.session import init_db, validate_db_setup
 from .core.dependencies import initialize_agents, cleanup_agents
 
-# Logging configuration
+# Secure logging configuration
+from .utils.logging_filter import setup_secure_logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Setup secure logging with sensitive data filtering
+setup_secure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +100,30 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+
+# Rate limiting (Redis will be optional fallback to in-memory)
+try:
+    import redis.asyncio as redis
+    redis_client = redis.from_url(settings.REDIS_URL)
+    logger.info("Redis client initialized for rate limiting")
+except Exception as e:
+    logger.warning(f"Redis not available, using in-memory rate limiter: {e}")
+    redis_client = None
+
+# Add rate limiting middleware
+from .middleware.rate_limit import RateLimitMiddleware
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_client=redis_client,
+    default_limit=settings.RATE_LIMIT_PER_MINUTE,
+    default_window=60,
+    endpoint_limits={
+        "/api/v1/orchestrate": (10, 60),  # Orchestration: 10 per minute
+        "/api/v1/orchestrate/": (10, 60),
+        "/api/v1/sessions": (30, 60),     # Sessions: 30 per minute
+        "/api/v1/agents": (100, 60),      # Agent endpoints: 100 per minute
+    }
+)
 
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
