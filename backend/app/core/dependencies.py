@@ -5,6 +5,7 @@ Manages agent lifecycle, database connections, and shared resources
 
 from typing import Dict, Any, Optional
 import logging
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 _agent_registry: Dict[str, Any] = {}
 _a2a_client: Optional[InMemoryA2AClient] = None
 _settings = Settings()
+
+# Lazy loading cache
+_lazy_agent_cache: Dict[str, Any] = {}
+_lazy_initialization_lock = asyncio.Lock()
 
 class AgentRegistry:
     """Centralized agent registry for dependency injection"""
@@ -46,29 +51,30 @@ class AgentRegistry:
             raise
     
     async def _initialize_agents(self):
-        """Create agent instances"""
+        """Create agent instances with improved error handling and timeouts"""
         try:
-            # Import agent classes
+            # Import agent classes with timeout protection
+            import asyncio
             from app.agents.requirement_analyzer.core.agent import RequirementAnalyzer
             from app.agents.architect_agent.core.agent import ArchitectAgent
             from app.agents.stack_recommender.core.agent import StackRecommenderAgent
             from app.agents.document_agent.core.agent import DocumentAgent
             
-            # Create instances with proper config
+            # Create instances with proper config - use in-memory client for all agents
             agent_config = {
-                "architect_url": _settings.ARCHITECT_URL if hasattr(_settings, 'ARCHITECT_URL') else "http://localhost:8001",
-                "stack_recommender_url": _settings.STACK_RECOMMENDER_URL if hasattr(_settings, 'STACK_RECOMMENDER_URL') else "http://localhost:8002", 
-                "documenter_url": _settings.DOCUMENTER_URL if hasattr(_settings, 'DOCUMENTER_URL') else "http://localhost:8003",
-                "llm_provider": getattr(_settings, 'LLM_PROVIDER', 'openai'),
-                "llm_model": getattr(_settings, 'LLM_MODEL', 'gpt-4'),
+                "llm_provider": getattr(_settings, 'LLM_PROVIDER', 'perplexity'),
+                "llm_model": getattr(_settings, 'LLM_MODEL', 'sonar-reasoning'),
                 "llm_api_key": getattr(_settings, 'LLM_API_KEY', None),
-                "openai_api_key": getattr(_settings, 'OPENAI_API_KEY_COMPAT', None),
-                "timeout": getattr(_settings, 'AGENT_TIMEOUT', 300)
+                "timeout": getattr(_settings, 'AGENT_TIMEOUT', 30),  # Reduced timeout
+                "use_in_memory_client": True  # Force in-memory client usage
             }
-            self.requirement_analyzer = RequirementAnalyzer(agent_config, a2a_client=self.a2a_client)
-            architect = ArchitectAgent(agent_config)
-            stack_recommender = StackRecommenderAgent(agent_config)
-            documenter = DocumentAgent(agent_config)
+            
+            # Create agents with timeout protection
+            async with asyncio.timeout(10):  # 10 second timeout for agent creation
+                self.requirement_analyzer = RequirementAnalyzer(agent_config, a2a_client=self.a2a_client)
+                architect = ArchitectAgent(agent_config)
+                stack_recommender = StackRecommenderAgent(agent_config)
+                documenter = DocumentAgent(agent_config)
             
             # Register with A2A client
             self.a2a_client.register("requirement-analyzer", self.requirement_analyzer)
@@ -94,36 +100,46 @@ class AgentRegistry:
             raise
     
     async def _register_agents_in_database(self):
-        """Register agents in database for API access"""
+        """Register agents in database for API access with timeout protection"""
         try:
-            async with AsyncSessionLocal() as db:
-                for agent_id, agent_instance in self.agents.items():
-                    # Check if agent already exists
-                    from sqlalchemy import select
-                    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-                    existing_agent = result.scalar_one_or_none()
+            import asyncio
+            # Add timeout protection for database operations
+            async with asyncio.timeout(5):  # 5 second timeout for DB operations
+                async with AsyncSessionLocal() as db:
+                    for agent_id, agent_instance in self.agents.items():
+                        try:
+                            # Check if agent already exists
+                            from sqlalchemy import select
+                            result = await db.execute(select(Agent).where(Agent.id == agent_id))
+                            existing_agent = result.scalar_one_or_none()
+                            
+                            if not existing_agent:
+                                # Create new agent record
+                                agent_record = Agent(
+                                    id=agent_id,
+                                    name=agent_id.replace("-", " ").title(),
+                                    role=agent_id.replace("-", "_"),
+                                    description=f"AI agent for {agent_id.replace('-', ' ')} tasks",
+                                    endpoint_url=f"local://{agent_id}",
+                                    capabilities=self._get_agent_capabilities(agent_id),
+                                    status="active",
+                                    version="1.0.0"
+                                )
+                                db.add(agent_record)
+                            else:
+                                # Update existing agent
+                                existing_agent.status = "active"
+                                existing_agent.endpoint_url = f"local://{agent_id}"
+                        
+                        except Exception as agent_error:
+                            logger.warning(f"Failed to register agent {agent_id}: {agent_error}")
+                            continue
                     
-                    if not existing_agent:
-                        # Create new agent record
-                        agent_record = Agent(
-                            id=agent_id,
-                            name=agent_id.replace("-", " ").title(),
-                            role=agent_id.replace("-", "_"),
-                            description=f"AI agent for {agent_id.replace('-', ' ')} tasks",
-                            endpoint_url=f"local://{agent_id}",
-                            capabilities=self._get_agent_capabilities(agent_id),
-                            status="active",
-                            version="1.0.0"
-                        )
-                        db.add(agent_record)
-                    else:
-                        # Update existing agent
-                        existing_agent.status = "active"
-                        existing_agent.endpoint_url = f"local://{agent_id}"
+                    await db.commit()
+                    logger.info("Agent database registration completed")
                 
-                await db.commit()
-                logger.info("Agent database registration completed")
-                
+        except asyncio.TimeoutError:
+            logger.warning("Database registration timed out - agents will work without DB registration")
         except Exception as e:
             logger.error(f"Database registration failed: {e}")
             # Continue anyway - agents can work without DB registration
@@ -234,6 +250,78 @@ def get_all_agents() -> Dict[str, Any]:
     """Get all registered agents"""
     registry = get_agent_registry()
     return registry.agents.copy()
+
+async def get_agent_lazy(agent_id: str) -> Any:
+    """Get agent with lazy initialization - creates agent on first request"""
+    global _lazy_agent_cache, _lazy_initialization_lock
+    
+    # Check if agent is already cached
+    if agent_id in _lazy_agent_cache:
+        return _lazy_agent_cache[agent_id]
+    
+    async with _lazy_initialization_lock:
+        # Double-check after acquiring lock
+        if agent_id in _lazy_agent_cache:
+            return _lazy_agent_cache[agent_id]
+        
+        logger.info(f"Lazy initializing agent: {agent_id}")
+        
+        try:
+            # Initialize agent based on type
+            agent_config = {
+                "llm_provider": getattr(_settings, 'LLM_PROVIDER', 'perplexity'),
+                "llm_model": getattr(_settings, 'LLM_MODEL', 'sonar-reasoning'),
+                "llm_api_key": getattr(_settings, 'LLM_API_KEY', None),
+                "timeout": getattr(_settings, 'AGENT_TIMEOUT', 30),
+                "use_in_memory_client": True
+            }
+            
+            # Get or create A2A client
+            if not _a2a_client:
+                _a2a_client = InMemoryA2AClient()
+            
+            # Create agent with timeout protection
+            async with asyncio.timeout(15):  # 15 second timeout for lazy loading
+                if agent_id == "requirement-analyzer":
+                    from app.agents.requirement_analyzer.core.agent import RequirementAnalyzer
+                    agent = RequirementAnalyzer(agent_config, a2a_client=_a2a_client)
+                elif agent_id == "architect":
+                    from app.agents.architect_agent.core.agent import ArchitectAgent
+                    agent = ArchitectAgent(agent_config)
+                elif agent_id == "stack_recommender":
+                    from app.agents.stack_recommender.core.agent import StackRecommenderAgent
+                    agent = StackRecommenderAgent(agent_config)
+                elif agent_id == "documenter":
+                    from app.agents.document_agent.core.agent import DocumentAgent
+                    agent = DocumentAgent(agent_config)
+                else:
+                    raise ValueError(f"Unknown agent type: {agent_id}")
+                
+                # Register with A2A client
+                _a2a_client.register(agent_id, agent)
+                
+                # Cache the agent
+                _lazy_agent_cache[agent_id] = agent
+                
+                logger.info(f"Agent '{agent_id}' lazy initialized successfully")
+                return agent
+                
+        except Exception as e:
+            logger.error(f"Failed to lazy initialize agent '{agent_id}': {e}")
+            raise RuntimeError(f"Agent '{agent_id}' initialization failed: {e}")
+
+def get_requirement_analyzer_lazy() -> RequirementAnalyzer:
+    """FastAPI dependency for lazy-loaded requirement analyzer"""
+    import asyncio
+    
+    # Create a new event loop for sync context if needed
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(get_agent_lazy("requirement-analyzer"))
 
 # Health check utilities
 async def check_agent_health(agent_id: str) -> Dict[str, Any]:

@@ -41,41 +41,56 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle management"""
+    """Application lifecycle management with timeout protection"""
+    import asyncio
+    
     # Startup
     logger.info("Application starting...")
     
-    # Database initialization
+    # Database initialization with timeout
     try:
-        db_validation = await validate_db_setup()
-        if not db_validation:
-            logger.error("Database setup validation failed")
-        else:
-            await init_db()
-            logger.info("Database initialized successfully")
+        async with asyncio.timeout(15):  # 15 second timeout for DB init
+            db_validation = await validate_db_setup()
+            if not db_validation:
+                logger.warning("Database setup validation failed - continuing with limited functionality")
+            else:
+                await init_db()
+                logger.info("Database initialized successfully")
+    except asyncio.TimeoutError:
+        logger.warning("Database initialization timed out - API will start with limited functionality")
     except Exception as e:
-        logger.error(f"Database initialization failed: {str(e)}")
+        logger.warning(f"Database initialization failed: {str(e)} - API will start with limited functionality")
     
-    # Initialize agent registry
+    # Initialize agent registry with timeout and error handling
     try:
-        await initialize_agents()
-        logger.info("Agent registry initialized successfully")
+        async with asyncio.timeout(30):  # 30 second timeout for agent init
+            await initialize_agents()
+            logger.info("Agent registry initialized successfully")
+    except asyncio.TimeoutError:
+        logger.warning("Agent initialization timed out - agents will be initialized on first use")
     except Exception as e:
-        logger.error(f"Agent initialization failed: {str(e)}")
+        logger.warning(f"Agent initialization failed: {str(e)} - agents will be initialized on first use")
     
-    logger.info("Application startup completed")
+    logger.info("Application startup completed - ready to accept requests")
     
     yield
     
-    # Shutdown
+    # Shutdown with timeout protection
     logger.info("Application shutting down...")
     
     try:
-        # Cleanup agents and connections
-        await cleanup_agents()
-        logger.info("Agent cleanup completed")
+        async with asyncio.timeout(10):  # 10 second timeout for cleanup
+            await cleanup_agents()
+            logger.info("Agent cleanup completed")
+            
+            # Cleanup database connections
+            from .db.session import cleanup_db_connections
+            await cleanup_db_connections()
+            
+    except asyncio.TimeoutError:
+        logger.warning("Cleanup timed out")
     except Exception as e:
-        logger.error(f"Agent cleanup error: {str(e)}")
+        logger.warning(f"Cleanup error: {str(e)}")
     
     logger.info("Application shutdown completed")
 
@@ -155,20 +170,98 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """Basic health check endpoint"""
     try:
         from .db.session import AsyncSessionLocal
         from sqlalchemy import text
-        async with AsyncSessionLocal() as db:
-            await db.execute(text("SELECT 1"))
+        import asyncio
+        
+        async with asyncio.timeout(5):  # 5 second timeout
+            async with AsyncSessionLocal() as db:
+                await db.execute(text("SELECT 1"))
         db_status = "connected"
+    except asyncio.TimeoutError:
+        db_status = "timeout"
     except Exception:
         db_status = "error"
     
     return {
-        "status": "healthy",
+        "status": "healthy" if db_status == "connected" else "degraded",
         "database": db_status,
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check with database performance metrics"""
+    from .db.session import get_db_health_info, check_db_performance
+    from .core.dependencies import system_health_check
+    import psutil
+    
+    try:
+        # Get database health
+        db_health = await get_db_health_info()
+        
+        # Get database performance metrics
+        db_performance = await check_db_performance()
+        
+        # Get system health
+        system_health = await system_health_check()
+        
+        # Get memory usage
+        memory_info = psutil.virtual_memory()
+        
+        return {
+            "status": "healthy" if db_health.get("status") == "healthy" else "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "database": db_health,
+            "performance": db_performance,
+            "agents": system_health,
+            "memory": {
+                "total_gb": round(memory_info.total / (1024**3), 2),
+                "available_gb": round(memory_info.available / (1024**3), 2),
+                "percent_used": memory_info.percent,
+                "status": "healthy" if memory_info.percent < 80 else "warning"
+            },
+            "recommendations": _get_health_recommendations(db_health, db_performance, system_health)
+        }
+    except Exception as e:
+        logger.error(f"Detailed health check failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+def _get_health_recommendations(db_health: dict, db_performance: dict, system_health: dict) -> list:
+    """Generate health recommendations based on system status"""
+    recommendations = []
+    
+    # Database recommendations
+    if db_health.get("status") != "healthy":
+        recommendations.append("Check database connectivity and configuration")
+    
+    if db_health.get("response_time_ms", 0) > 1000:
+        recommendations.append("Database response time is slow - consider connection pool optimization")
+    
+    if db_performance.get("status") == "success":
+        metrics = db_performance.get("metrics", {})
+        if metrics.get("connection_pool_utilization", 0) > 80:
+            recommendations.append("Connection pool utilization high - consider increasing pool size")
+    
+    # Agent system recommendations
+    if system_health.get("system_status") != "healthy":
+        recommendations.append("Agent system is degraded - check individual agent health")
+    
+    if system_health.get("healthy_agents", 0) < system_health.get("total_agents", 0):
+        recommendations.append("Some agents are unhealthy - check agent initialization")
+    
+    if not recommendations:
+        recommendations.append("All systems operating normally")
+    
+    return recommendations
 
 # API router registration
 from app.api.v1 import sessions, agents, orchestration, a2a

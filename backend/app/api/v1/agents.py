@@ -84,27 +84,33 @@ async def list_agents(
     skip: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db)
 ):
-    """List all registered agents with optional filtering"""
+    """List all registered agents with optional filtering and timeout protection"""
     try:
-        query = select(Agent)
+        import asyncio
+        # Add timeout protection for database query
+        async with asyncio.timeout(10):  # 10 second timeout
+            query = select(Agent)
+            
+            # Apply filters
+            conditions = []
+            if status:
+                conditions.append(Agent.status == status.value)
+            if capability:
+                conditions.append(Agent.capabilities.contains([capability.value]))
+            
+            if conditions:
+                query = query.where(and_(*conditions))
+            
+            query = query.order_by(desc(Agent.last_seen)).offset(skip).limit(limit)
+            
+            result = await db.execute(query)
+            agents = result.scalars().all()
+            
+            return agents
         
-        # Apply filters
-        conditions = []
-        if status:
-            conditions.append(Agent.status == status.value)
-        if capability:
-            conditions.append(Agent.capabilities.contains([capability.value]))
-        
-        if conditions:
-            query = query.where(and_(*conditions))
-        
-        query = query.order_by(desc(Agent.last_seen)).offset(skip).limit(limit)
-        
-        result = await db.execute(query)
-        agents = result.scalars().all()
-        
-        return agents
-        
+    except asyncio.TimeoutError:
+        logger.error("Agent list query timed out")
+        raise HTTPException(status_code=408, detail="Agent list query timed out")
     except Exception as e:
         logger.error(f"Failed to list agents: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve agents")

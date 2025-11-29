@@ -26,22 +26,29 @@ async def create_session(
     session_data: SessionCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new session"""
+    """Create a new session with timeout protection"""
     try:
-        # Create new session
-        new_session = Session(
-            title=session_data.title,
-            description=session_data.description,
-            requirements_text=session_data.requirements_text
-        )
+        import asyncio
+        # Add timeout protection for session creation
+        async with asyncio.timeout(10):  # 10 second timeout
+            # Create new session
+            new_session = Session(
+                title=session_data.title,
+                description=session_data.description,
+                requirements_text=session_data.requirements_text
+            )
+            
+            db.add(new_session)
+            await db.commit()
+            await db.refresh(new_session)
+            
+            logger.info(f"Created session {new_session.id}: {new_session.title}")
+            return new_session
         
-        db.add(new_session)
-        await db.commit()
-        await db.refresh(new_session)
-        
-        logger.info(f"Created session {new_session.id}: {new_session.title}")
-        return new_session
-        
+    except asyncio.TimeoutError:
+        await db.rollback()
+        logger.error("Session creation timed out")
+        raise HTTPException(status_code=408, detail="Session creation timed out")
     except Exception as e:
         logger.error(f"Failed to create session: {e}")
         await db.rollback()
@@ -272,23 +279,26 @@ async def orchestrate_full_workflow(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """Start full agent orchestration workflow"""
+    """Start full agent orchestration workflow with timeout protection"""
     try:
-        # Create new session for orchestration
-        session = Session(
-            title=orchestration_request.session_title or "AI Strategy Session",
-            description="Full agent orchestration workflow",
-            requirements_text=orchestration_request.requirements,
-            status="processing"
-        )
+        import asyncio
+        # Add timeout protection for session creation
+        async with asyncio.timeout(5):  # 5 second timeout for session creation only
+            # Create new session for orchestration
+            session = Session(
+                title=orchestration_request.session_title or "AI Strategy Session",
+                description="Full agent orchestration workflow",
+                requirements_text=orchestration_request.requirements,
+                status="started"  # Changed from "processing" to "started"
+            )
+            
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
         
-        db.add(session)
-        await db.commit()
-        await db.refresh(session)
-        
-        # Schedule full orchestration workflow
+        # Schedule background workflow - this should not block the response
         background_tasks.add_task(
-            _execute_full_orchestration,
+            _execute_full_orchestration_safe,  # Use safe version
             session.id,
             orchestration_request.requirements,
             orchestration_request.preferences or {}
@@ -296,15 +306,20 @@ async def orchestrate_full_workflow(
         
         logger.info(f"Started full orchestration workflow for session {session.id}")
         
+        # Return immediately without waiting for background task
         return OrchestrationResponse(
             session_id=session.id,
-            status="processing",
-            message="Full orchestration workflow initiated",
+            status="STARTED",  # Use consistent status naming
+            message="Orchestration workflow initiated successfully",
             estimated_completion_minutes=15,
             tasks=[],
             artifacts=[]
         )
         
+    except asyncio.TimeoutError:
+        await db.rollback()
+        logger.error("Orchestration session creation timed out")
+        raise HTTPException(status_code=408, detail="Session creation timed out")
     except Exception as e:
         logger.error(f"Failed to start orchestration: {e}")
         await db.rollback()
@@ -381,62 +396,101 @@ async def _execute_requirement_analysis(
             logger.error(f"Failed to update task status: {db_error}")
 
 
-async def _execute_full_orchestration(
+async def _execute_full_orchestration_safe(
     session_id: str,
     requirements: str,
     preferences: Dict[str, Any]
 ):
-    """Background task for full orchestration workflow execution"""
+    """Background task for full orchestration workflow execution with timeout protection"""
     from app.db.session import AsyncSessionLocal
-    from app.agents.requirement_analyzer.core.agent import RequirementAnalyzer
-    from app.agents.shared.a2a_client.mock_client import InMemoryA2AClient
+    from app.core.dependencies import get_agent_registry
     
     try:
-        async with AsyncSessionLocal() as db:
-            # Update session status
-            session_result = await db.execute(select(Session).where(Session.id == session_id))
-            session = session_result.scalar_one_or_none()
+        import asyncio
+        
+        # Set overall timeout for orchestration
+        async with asyncio.timeout(300):  # 5 minute timeout for full orchestration
+            async with AsyncSessionLocal() as db:
+                # Update session status to processing
+                session_result = await db.execute(select(Session).where(Session.id == session_id))
+                session = session_result.scalar_one_or_none()
+                
+                if not session:
+                    logger.error(f"Session {session_id} not found")
+                    return
+                
+                session.status = "IN_PROGRESS"
+                await db.commit()
             
-            if not session:
-                logger.error(f"Session {session_id} not found")
-                return
-            
-            # Initialize orchestration components
-            a2a_client = InMemoryA2AClient()
-            analyzer = RequirementAnalyzer(a2a_client=a2a_client)
-            
-            # Register agents with the client (simulate agent registration)
-            await _register_test_agents(a2a_client)
-            
-            # Execute full orchestration
-            orchestration_result = await analyzer.analyze_and_orchestrate(
-                requirements=requirements,
-                session_id=session_id
-            )
-            
-            # Save orchestration results
-            await _save_orchestration_results(db, session_id, orchestration_result)
-            
-            # Update session status
-            session.status = "completed"
-            await db.commit()
-            
-            logger.info(f"Full orchestration completed for session {session_id}")
-            
+            # Get agent registry with timeout protection
+            try:
+                registry = get_agent_registry()
+                requirement_analyzer = registry.requirement_analyzer
+                
+                if not requirement_analyzer:
+                    raise RuntimeError("Requirement analyzer not available")
+                
+                # Execute orchestration with smaller timeout
+                async with asyncio.timeout(240):  # 4 minute timeout for actual work
+                    orchestration_result = await requirement_analyzer.analyze_and_orchestrate(
+                        requirements=requirements,
+                        session_id=session_id
+                    )
+                
+                # Save results with timeout
+                async with asyncio.timeout(30):  # 30 second timeout for saving
+                    async with AsyncSessionLocal() as db:
+                        await _save_orchestration_results_safe(db, session_id, orchestration_result)
+                        
+                        # Update session status
+                        session_result = await db.execute(select(Session).where(Session.id == session_id))
+                        session = session_result.scalar_one_or_none()
+                        if session:
+                            session.status = "COMPLETED"
+                            await db.commit()
+                
+                logger.info(f"Full orchestration completed for session {session_id}")
+                
+            except Exception as agent_error:
+                logger.error(f"Agent orchestration error for session {session_id}: {agent_error}")
+                await _update_session_status_safe(session_id, "FAILED", str(agent_error))
+                
+    except asyncio.TimeoutError:
+        logger.error(f"Full orchestration timed out for session {session_id}")
+        await _update_session_status_safe(session_id, "FAILED", "Orchestration timed out")
     except Exception as e:
         logger.error(f"Full orchestration failed for session {session_id}: {e}")
+        await _update_session_status_safe(session_id, "FAILED", str(e))
+
+
+async def _update_session_status_safe(session_id: str, status: str, error_message: str = None):
+    """Safely update session status with timeout protection"""
+    try:
+        import asyncio
+        from app.db.session import AsyncSessionLocal
         
-        # Update session status to failed
-        try:
+        async with asyncio.timeout(5):  # 5 second timeout
             async with AsyncSessionLocal() as db:
                 session_result = await db.execute(select(Session).where(Session.id == session_id))
                 session = session_result.scalar_one_or_none()
                 
                 if session:
-                    session.status = "failed"
+                    session.status = status
+                    if error_message and hasattr(session, 'error_message'):
+                        session.error_message = error_message
                     await db.commit()
-        except Exception as db_error:
-            logger.error(f"Failed to update session status: {db_error}")
+    except Exception as db_error:
+        logger.error(f"Failed to update session status: {db_error}")
+
+
+# Keep original function for backward compatibility
+async def _execute_full_orchestration(
+    session_id: str,
+    requirements: str,
+    preferences: Dict[str, Any]
+):
+    """Legacy function - redirects to safe version"""
+    await _execute_full_orchestration_safe(session_id, requirements, preferences)
 
 
 async def _register_test_agents(client: InMemoryA2AClient):
@@ -462,68 +516,60 @@ async def _register_test_agents(client: InMemoryA2AClient):
         logger.warning(f"Failed to register some agents: {e}")
 
 
-async def _save_orchestration_results(
+async def _save_orchestration_results_safe(
     db: AsyncSession,
     session_id: str,
     results: Dict[str, Any]
 ):
-    """Save orchestration results as artifacts"""
+    """Save orchestration results as artifacts with timeout protection"""
     try:
+        import asyncio
         artifacts_created = 0
         
-        # Save different types of results as separate artifacts
-        if "analysis" in results:
-            analysis_artifact = Artifact(
-                session_id=session_id,
-                artifact_type="requirement_analysis",
-                title="Requirements Analysis",
-                content=results["analysis"],
-                created_by="requirement-analyzer",
-                is_final=True
-            )
-            db.add(analysis_artifact)
-            artifacts_created += 1
+        # Save different types of results as separate artifacts with individual timeouts
+        artifact_types = [
+            ("analysis", "requirement_analysis", "Requirements Analysis", "requirement-analyzer"),
+            ("architecture", "architecture_design", "System Architecture Design", "architect"),
+            ("stack", "stack_recommendation", "Technology Stack Recommendation", "stack-recommender"),
+            ("documentation", "documentation", "Project Documentation", "documenter")
+        ]
         
-        if "architecture" in results:
-            arch_artifact = Artifact(
-                session_id=session_id,
-                artifact_type="architecture_design",
-                title="System Architecture Design",
-                content=results["architecture"],
-                created_by="architect",
-                is_final=True
-            )
-            db.add(arch_artifact)
-            artifacts_created += 1
-        
-        if "stack" in results:
-            stack_artifact = Artifact(
-                session_id=session_id,
-                artifact_type="stack_recommendation",
-                title="Technology Stack Recommendation",
-                content=results["stack"],
-                created_by="stack-recommender",
-                is_final=True
-            )
-            db.add(stack_artifact)
-            artifacts_created += 1
-        
-        if "documentation" in results:
-            doc_artifact = Artifact(
-                session_id=session_id,
-                artifact_type="documentation",
-                title="Project Documentation",
-                content=results["documentation"],
-                created_by="documenter",
-                is_final=True
-            )
-            db.add(doc_artifact)
-            artifacts_created += 1
+        for result_key, artifact_type, title, created_by in artifact_types:
+            if result_key in results:
+                try:
+                    # Create artifact with timeout protection
+                    async with asyncio.timeout(5):  # 5 second timeout per artifact
+                        artifact = Artifact(
+                            session_id=session_id,
+                            artifact_type=artifact_type,
+                            title=title,
+                            content=results[result_key],
+                            created_by=created_by,
+                            is_final=True
+                        )
+                        db.add(artifact)
+                        artifacts_created += 1
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout saving artifact {result_key} for session {session_id}")
+                except Exception as artifact_error:
+                    logger.error(f"Failed to save artifact {result_key}: {artifact_error}")
         
         await db.commit()
         logger.info(f"Saved {artifacts_created} artifacts for session {session_id}")
         
     except Exception as e:
         logger.error(f"Failed to save orchestration results: {e}")
-        await db.rollback()
-        raise
+        try:
+            await db.rollback()
+        except:
+            pass  # Ignore rollback errors
+
+
+# Keep original function for backward compatibility
+async def _save_orchestration_results(
+    db: AsyncSession,
+    session_id: str,
+    results: Dict[str, Any]
+):
+    """Legacy function - redirects to safe version"""
+    await _save_orchestration_results_safe(db, session_id, results)

@@ -123,30 +123,33 @@ async def get_orchestration_status(
     session_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get current orchestration workflow status"""
+    """Get current orchestration workflow status with timeout protection"""
     try:
-        # Get session
-        result = await db.execute(select(DBSession).where(DBSession.id == session_id))
-        session = result.scalar_one_or_none()
-        
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Get tasks
-        task_result = await db.execute(
-            select(Task)
-            .where(Task.session_id == session_id)
-            .order_by(Task.created_at)
-        )
-        tasks = task_result.scalars().all()
-        
-        # Get artifacts
-        artifact_result = await db.execute(
-            select(Artifact)
-            .where(Artifact.session_id == session_id)
-            .order_by(Artifact.created_at)
-        )
-        artifacts = artifact_result.scalars().all()
+        import asyncio
+        # Add timeout protection for status query
+        async with asyncio.timeout(10):  # 10 second timeout
+            # Get session
+            result = await db.execute(select(DBSession).where(DBSession.id == session_id))
+            session = result.scalar_one_or_none()
+            
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            
+            # Get tasks
+            task_result = await db.execute(
+                select(Task)
+                .where(Task.session_id == session_id)
+                .order_by(Task.created_at)
+            )
+            tasks = task_result.scalars().all()
+            
+            # Get artifacts
+            artifact_result = await db.execute(
+                select(Artifact)
+                .where(Artifact.session_id == session_id)
+                .order_by(Artifact.created_at)
+            )
+            artifacts = artifact_result.scalars().all()
         
         # Determine status
         status = _determine_workflow_status(session, tasks)
@@ -182,15 +185,18 @@ async def get_orchestration_status(
         
         progress_percentage = _calculate_overall_progress(tasks)
         
-        return OrchestrationResponse(
-            session_id=session_id,
-            status=status,
-            progress_percentage=progress_percentage,
-            message=_get_status_message(status, progress_percentage),
-            tasks=task_summaries,
-            artifacts=artifact_summaries
-        )
+            return OrchestrationResponse(
+                session_id=session_id,
+                status=status,
+                progress_percentage=progress_percentage,
+                message=_get_status_message(status, progress_percentage),
+                tasks=task_summaries,
+                artifacts=artifact_summaries
+            )
         
+    except asyncio.TimeoutError:
+        logger.error(f"Status query timed out for session {session_id}")
+        raise HTTPException(status_code=408, detail="Status query timed out")
     except HTTPException:
         raise
     except Exception as e:
