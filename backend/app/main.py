@@ -137,6 +137,8 @@ app.add_middleware(
         "/api/v1/orchestrate/": (10, 60),
         "/api/v1/sessions": (30, 60),     # Sessions: 30 per minute
         "/api/v1/agents": (100, 60),      # Agent endpoints: 100 per minute
+        "/api/v1/security": (20, 60),     # Security endpoints: 20 per minute
+        "/api/v1/security/tools/execute": (5, 60),  # Tool execution: 5 per minute
     }
 )
 
@@ -264,12 +266,13 @@ def _get_health_recommendations(db_health: dict, db_performance: dict, system_he
     return recommendations
 
 # API router registration
-from app.api.v1 import sessions, agents, orchestration, a2a
+from app.api.v1 import sessions, agents, orchestration, a2a, security
 
 app.include_router(sessions.router, prefix=f"{settings.API_PREFIX}/sessions", tags=["sessions"])
 app.include_router(agents.router, prefix=f"{settings.API_PREFIX}/agents", tags=["agents"])
 app.include_router(orchestration.router, prefix=f"{settings.API_PREFIX}/orchestrate", tags=["orchestration"])
 app.include_router(a2a.router, prefix=f"{settings.API_PREFIX}/a2a", tags=["a2a_communication"])
+app.include_router(security.router, prefix=f"{settings.API_PREFIX}", tags=["security_platform"])
 
 if settings.DEBUG:
     from fastapi.openapi.docs import get_swagger_ui_html
