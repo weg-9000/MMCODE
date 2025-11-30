@@ -3,7 +3,7 @@ Network Security Tools
 ======================
 
 Integration for network scanning and discovery tools:
-- Nmap: Network mapping and port scanning
+- Nmap: Network mapping and port scanning with scope validation
 - Masscan: High-speed port scanner
 """
 
@@ -13,17 +13,95 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from .base import BaseSecurityTool, ToolError
+from ..security.scope_enforcer import ScopeEnforcementEngine
+from ..security.models import SecurityAction, generate_action_id, PentestPhase
 
 
 class NmapTool(BaseSecurityTool):
-    """Nmap integration for network scanning and service detection"""
+    """
+    Nmap integration for network scanning and service detection
+    
+    Features:
+    - Scope-validated scanning
+    - Comprehensive service detection
+    - Script engine support
+    - Docker sandbox integration ready
+    """
+    
+    def __init__(self, 
+                 scope_enforcer: ScopeEnforcementEngine = None,
+                 tool_path: str = None,
+                 timeout: int = 1800,
+                 output_dir: str = "/tmp/nmap_scans"):
+        """
+        Args:
+            scope_enforcer: Scope validation engine
+            tool_path: Path to nmap binary
+            timeout: Execution timeout in seconds
+            output_dir: Output directory for scan files
+        """
+        self.scope_enforcer = scope_enforcer
+        super().__init__(tool_path, timeout, output_dir)
     
     @property
     def tool_name(self) -> str:
         return "nmap"
     
     def get_default_path(self) -> str:
-        return "nmap"  # Assume in PATH
+        import shutil
+        return shutil.which("nmap") or "nmap"
+    
+    async def scan_with_validation(self, 
+                                  targets: List[str], 
+                                  scan_type: str = "default",
+                                  ports: str = None) -> 'ToolResult':
+        """
+        Execute nmap scan with scope validation
+        
+        Args:
+            targets: List of targets to scan
+            scan_type: Type of scan to perform
+            ports: Port specification
+            
+        Returns:
+            ToolResult with scan findings
+        """
+        if self.scope_enforcer:
+            await self._validate_targets(targets)
+        
+        options = {
+            'scan_type': scan_type,
+            'ports': ports,
+            'xml_output': True
+        }
+        
+        # Single target or multi-target
+        if len(targets) == 1:
+            return await self.execute(targets[0], options)
+        else:
+            target_list = " ".join(targets)
+            return await self.execute(target_list, options)
+    
+    async def _validate_targets(self, targets: List[str]):
+        """Validate all targets against engagement scope"""
+        for target in targets:
+            action = SecurityAction(
+                action_id=generate_action_id(),
+                action_type="port_scan",
+                target=target,
+                tool_name="nmap",
+                method="port_scan",
+                phase=PentestPhase.SCANNING,
+                requires_network=True
+            )
+            
+            validation_result = await self.scope_enforcer.validate_action(action)
+            
+            if not validation_result.valid:
+                raise ToolError(
+                    f"Target {target} failed scope validation: "
+                    f"{'; '.join(validation_result.all_violations)}"
+                )
     
     def build_command(self, 
                      target: str, 

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from .base import BaseSecurityTool, ToolResult, ToolError
 from .network import NmapTool, MasscanTool
 from .vulnerability import NucleiTool, ZapTool
-from .enumeration import GobusterTool, AmassToolc
+from .enumeration import GobusterTool, AmassTools
 from ..security import SecurityAction, ScopeEnforcementEngine, SecurityAuditLogger
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class SecurityToolExecutor:
         'nuclei': NucleiTool,
         'zap': ZapTool,
         'gobuster': GobusterTool,
-        'amass': AmassToolc
+        'amass': AmassTools
     }
     
     def __init__(self, 

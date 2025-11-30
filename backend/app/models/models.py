@@ -402,28 +402,44 @@ class HumanApproval(Base):
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     
-    # Approval details
-    action_id = Column(String(100), nullable=False)
-    action_description = Column(Text, nullable=False)
+    # Action details
+    action_id = Column(String(100), nullable=False, index=True)
+    action_type = Column(String(100), nullable=False)
+    target = Column(String(500), nullable=True)
+    tool_name = Column(String(100), nullable=True)
+    command = Column(Text, nullable=True)
+    
+    # Risk assessment
     risk_level = Column(Enum(RiskLevelEnum), nullable=False)
+    risk_score = Column(Float, nullable=False)  # 0.0 - 1.0
+    risk_factors = Column(JSON, nullable=True)  # List of risk factors
+    impact_assessment = Column(Text, nullable=True)
     
-    # Approver information
-    approver_name = Column(String(255), nullable=False)
-    approver_email = Column(String(255))
-    approver_role = Column(String(100))
-    
-    # Approval decision
-    approved = Column(Boolean, nullable=False)
-    approval_comments = Column(Text)
-    conditions = Column(JSON)  # Any conditional approvals
-    
-    # Timing
+    # Request details
+    requested_by = Column(String(255), nullable=False)
     requested_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    approved_at = Column(DateTime(timezone=True))
-    expires_at = Column(DateTime(timezone=True))
+    justification = Column(Text, nullable=True)
     
-    # Digital signature (optional)
-    signature_hash = Column(String(128))
+    # Approval workflow
+    required_approver_role = Column(String(100), nullable=False)
+    approval_conditions = Column(JSON, nullable=True)  # Required conditions
+    timeout_at = Column(DateTime(timezone=True), nullable=False)
+    
+    # Status and result
+    status = Column(String(50), default="pending")  # pending, approved, denied, timeout, cancelled
+    approver_id = Column(String(255), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    denial_reason = Column(Text, nullable=True)
+    approval_conditions_accepted = Column(JSON, nullable=True)  # Accepted conditions
+    
+    # Metadata
+    reason = Column(Text, nullable=True)  # Additional approval/denial reason
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # When approval expires
+    signature_hash = Column(String(128), nullable=True)  # Digital signature
+    
+    # Audit trail
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     def __repr__(self):
-        return f"<HumanApproval(id='{self.id}', action_id='{self.action_id}', approved='{self.approved}')>"
+        return f"<HumanApproval(id='{self.id}', action_id='{self.action_id}', status='{self.status}')>"

@@ -621,6 +621,322 @@ async def get_audit_logs(
         )
 
 
+# Human Approval Workflow
+
+@router.post("/approvals/request", summary="Request approval for security action")
+async def request_approval(
+    approval_request: Dict[str, Any],
+    db = Depends(get_db)
+):
+    """Request approval for a high-risk security action"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow, ApprovalConfiguration
+        from ...security.notifications import NotificationManager, NotificationConfig
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Create security action
+        action = SecurityAction(
+            action_id=approval_request.get("action_id", generate_action_id()),
+            action_type=approval_request["action_type"],
+            target=approval_request.get("target"),
+            tool_name=approval_request.get("tool_name"),
+            command=approval_request.get("command"),
+            phase=PentestPhase[approval_request.get("phase", "RECONNAISSANCE")],
+            risk_level=RiskLevel[approval_request.get("risk_level", "LOW")],
+            requires_network=approval_request.get("requires_network", True),
+            is_destructive=approval_request.get("is_destructive", False)
+        )
+        
+        # Request approval
+        request = await workflow.request_approval(
+            action=action,
+            requested_by=approval_request["requested_by"],
+            justification=approval_request.get("justification", ""),
+            context=approval_request.get("context", {})
+        )
+        
+        return {
+            "request_id": request.request_id,
+            "status": request.status.value,
+            "risk_assessment": {
+                "risk_level": request.risk_assessment.risk_level.value,
+                "risk_score": request.risk_assessment.risk_score,
+                "risk_factors": request.risk_assessment.risk_factors,
+                "impact_assessment": request.risk_assessment.impact_assessment,
+                "recommended_conditions": request.risk_assessment.recommended_conditions
+            },
+            "workflow": {
+                "required_approver_role": request.required_approver_role,
+                "timeout_at": request.timeout_at.isoformat(),
+                "approval_conditions": request.approval_conditions
+            },
+            "message": "Approval request created successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to request approval: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to request approval: {str(e)}"
+        )
+
+
+@router.post("/approvals/{request_id}/process", summary="Process approval request")
+async def process_approval(
+    request_id: str,
+    approval_data: Dict[str, Any],
+    db = Depends(get_db)
+):
+    """Process an approval request (approve or deny)"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Process approval
+        result = await workflow.process_approval(
+            request_id=request_id,
+            approved=approval_data["approved"],
+            approver_id=approval_data["approver_id"],
+            reason=approval_data.get("reason", ""),
+            conditions_accepted=approval_data.get("conditions_accepted", [])
+        )
+        
+        return {
+            "request_id": request_id,
+            "result": result.value,
+            "processed_by": approval_data["approver_id"],
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "message": f"Approval request {result.value} successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to process approval: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process approval: {str(e)}"
+        )
+
+
+@router.get("/approvals/pending", summary="Get pending approval requests")
+async def get_pending_approvals(
+    approver_role: Optional[str] = None,
+    db = Depends(get_db)
+):
+    """Get list of pending approval requests"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Get pending requests
+        requests = await workflow.get_pending_requests(approver_role=approver_role)
+        
+        return {
+            "pending_requests": [
+                {
+                    "request_id": req.request_id,
+                    "action": {
+                        "action_id": req.action.action_id,
+                        "action_type": req.action.action_type,
+                        "target": req.action.target,
+                        "tool_name": req.action.tool_name,
+                        "phase": req.action.phase.value
+                    },
+                    "risk_assessment": {
+                        "risk_level": req.risk_assessment.risk_level.value,
+                        "risk_score": req.risk_assessment.risk_score,
+                        "impact_assessment": req.risk_assessment.impact_assessment
+                    },
+                    "workflow": {
+                        "requested_by": req.requested_by,
+                        "requested_at": req.requested_at.isoformat(),
+                        "required_approver_role": req.required_approver_role,
+                        "timeout_at": req.timeout_at.isoformat(),
+                        "justification": req.justification
+                    }
+                }
+                for req in requests
+            ],
+            "total_count": len(requests)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get pending approvals: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get pending approvals: {str(e)}"
+        )
+
+
+@router.get("/approvals/{request_id}", summary="Get approval request details")
+async def get_approval_details(request_id: str, db = Depends(get_db)):
+    """Get detailed information about an approval request"""
+    try:
+        approval = db.query(HumanApprovalModel).filter(
+            HumanApprovalModel.id == request_id
+        ).first()
+        
+        if not approval:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Approval request not found"
+            )
+        
+        return {
+            "request_id": approval.id,
+            "action": {
+                "action_id": approval.action_id,
+                "action_type": approval.action_type,
+                "target": approval.target,
+                "tool_name": approval.tool_name,
+                "command": approval.command
+            },
+            "risk_assessment": {
+                "risk_level": approval.risk_level.value,
+                "risk_score": approval.risk_score,
+                "risk_factors": approval.risk_factors,
+                "impact_assessment": approval.impact_assessment
+            },
+            "workflow": {
+                "requested_by": approval.requested_by,
+                "requested_at": approval.requested_at.isoformat(),
+                "justification": approval.justification,
+                "required_approver_role": approval.required_approver_role,
+                "approval_conditions": approval.approval_conditions,
+                "timeout_at": approval.timeout_at.isoformat(),
+                "status": approval.status,
+                "approver_id": approval.approver_id,
+                "approved_at": approval.approved_at.isoformat() if approval.approved_at else None,
+                "denial_reason": approval.denial_reason,
+                "approval_conditions_accepted": approval.approval_conditions_accepted
+            },
+            "metadata": {
+                "created_at": approval.created_at.isoformat(),
+                "updated_at": approval.updated_at.isoformat(),
+                "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+                "signature_hash": approval.signature_hash
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get approval details: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get approval details: {str(e)}"
+        )
+
+
+@router.delete("/approvals/{request_id}", summary="Cancel approval request")
+async def cancel_approval(
+    request_id: str,
+    cancellation_data: Dict[str, Any],
+    db = Depends(get_db)
+):
+    """Cancel a pending approval request"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Cancel request
+        success = await workflow.cancel_request(
+            request_id=request_id,
+            cancelled_by=cancellation_data["cancelled_by"],
+            reason=cancellation_data.get("reason", "")
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Approval request not found or already processed"
+            )
+        
+        return {
+            "request_id": request_id,
+            "status": "cancelled",
+            "cancelled_by": cancellation_data["cancelled_by"],
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Approval request cancelled successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to cancel approval: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel approval: {str(e)}"
+        )
+
+
+@router.get("/approvals/action/{action_id}/status", summary="Check action approval status")
+async def check_action_approval(action_id: str, db = Depends(get_db)):
+    """Check if a security action is approved and ready for execution"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Check approval status
+        approval = await workflow.check_action_approval(action_id)
+        
+        if approval:
+            return {
+                "action_id": action_id,
+                "approved": approval.granted,
+                "approver": approval.approver,
+                "approved_at": approval.approved_at.isoformat(),
+                "conditions": approval.conditions,
+                "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+                "valid": approval.is_valid(),
+                "message": "Action is approved for execution"
+            }
+        else:
+            return {
+                "action_id": action_id,
+                "approved": False,
+                "message": "Action is not approved or approval not found"
+            }
+        
+    except Exception as e:
+        logger.error(f"Failed to check action approval: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check action approval: {str(e)}"
+        )
+
+
+@router.post("/approvals/cleanup", summary="Cleanup expired approval requests")
+async def cleanup_expired_approvals(db = Depends(get_db)):
+    """Cleanup expired and timed out approval requests"""
+    try:
+        from ...security.approval_workflow import ApprovalWorkflow
+        
+        # Initialize approval workflow
+        workflow = ApprovalWorkflow(db_session=db)
+        
+        # Cleanup expired requests
+        await workflow.cleanup_expired_requests()
+        
+        return {
+            "status": "success",
+            "message": "Expired approval requests cleaned up successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to cleanup expired approvals: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cleanup expired approvals: {str(e)}"
+        )
+
+
 # Statistics and Reporting
 
 @router.get("/stats", summary="Get security platform statistics")

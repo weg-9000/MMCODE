@@ -51,6 +51,27 @@ from .audit_logger import (
     create_audit_logger,
 )
 
+# Approval workflow components
+from .approval_workflow import (
+    ApprovalWorkflow,
+    RiskEvaluator,
+    ApprovalConfiguration,
+    ApprovalRequest,
+    ApprovalResult,
+    RiskAssessment,
+)
+
+from .notifications import (
+    NotificationManager,
+    NotificationConfig,
+    NotificationChannel,
+)
+
+from .approval_integration import (
+    ApprovalIntegrationManager,
+    SecurityToolWrapper,
+)
+
 __all__ = [
     # Enums
     "PentestPhase",
@@ -80,6 +101,19 @@ __all__ = [
     # Factories
     "create_scope_enforcer",
     "create_audit_logger",
+    
+    # Approval workflow
+    "ApprovalWorkflow",
+    "RiskEvaluator", 
+    "ApprovalConfiguration",
+    "ApprovalRequest",
+    "ApprovalResult",
+    "RiskAssessment",
+    "NotificationManager",
+    "NotificationConfig",
+    "NotificationChannel",
+    "ApprovalIntegrationManager",
+    "SecurityToolWrapper",
     
     # Utilities
     "generate_action_id",

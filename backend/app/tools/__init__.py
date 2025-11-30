@@ -13,7 +13,7 @@ Integration layer for open-source security testing tools:
 from .base import BaseSecurityTool, ToolResult, ToolError
 from .network import NmapTool, MasscanTool
 from .vulnerability import NucleiTool, ZapTool
-from .enumeration import GobusterTool, AmassToolc
+from .enumeration import GobusterTool, AmassTools
 from .executor import SecurityToolExecutor
 
 __all__ = [
@@ -25,6 +25,6 @@ __all__ = [
     "NucleiTool",
     "ZapTool", 
     "GobusterTool",
-    "AmassToolc",
+    "AmassTools",
     "SecurityToolExecutor"
 ]
