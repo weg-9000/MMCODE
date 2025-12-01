@@ -14,6 +14,7 @@ Version: 1.0.0
 import asyncio
 import logging
 import json
+import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -49,7 +50,7 @@ class NotificationConfig:
     webhook_timeout: int = 30
     
     # Approver mappings
-    approver_contacts: Dict[str, Dict[str, str]] = None  # role -> {email, slack_user_id}
+    approver_contacts: Dict[str, Dict[str, str]] = None  # role -> {email, slack_user_id, phone}
     
     def __post_init__(self):
         if self.webhook_urls is None:
@@ -58,21 +59,57 @@ class NotificationConfig:
             self.approver_contacts = {
                 "security_analyst": {
                     "email": "analyst@mmcode.ai",
-                    "slack_user_id": "@security-analyst"
+                    "slack_user_id": "@security-analyst",
+                    "phone": "+821012345678"
                 },
                 "security_lead": {
                     "email": "lead@mmcode.ai", 
-                    "slack_user_id": "@security-lead"
+                    "slack_user_id": "@security-lead",
+                    "phone": "+821023456789"
                 },
                 "security_manager": {
                     "email": "manager@mmcode.ai",
-                    "slack_user_id": "@security-manager"
+                    "slack_user_id": "@security-manager",
+                    "phone": "+821034567890"
                 },
                 "ciso": {
                     "email": "ciso@mmcode.ai",
-                    "slack_user_id": "@ciso"
+                    "slack_user_id": "@ciso",
+                    "phone": "+821045678901"
                 }
             }
+
+
+@dataclass
+class SMSConfig:
+    """SMS 알림 설정"""
+    # AWS SNS 설정
+    aws_region: str = "ap-northeast-2"  # 서울 리전
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    
+    # Twilio 대안 설정 (선택)
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_from_number: Optional[str] = None
+    
+    # SMS 설정
+    sender_id: str = "MMCODE"  # 발신자 ID (일부 국가에서 지원)
+    message_type: str = "Transactional"  # Transactional or Promotional
+    max_price: str = "0.50"  # USD per message
+    
+    # 수신자 매핑
+    approver_phones: Dict[str, str] = None  # role -> phone number
+    
+    def __post_init__(self):
+        if self.approver_phones is None:
+            self.approver_phones = {
+                "security_analyst": "+821012345678",
+                "security_lead": "+821023456789",
+                "security_manager": "+821034567890",
+                "ciso": "+821045678901"
+            }
+    
 
 
 class EmailNotificationHandler:
@@ -664,9 +701,192 @@ class NotificationManager:
         """설정 업데이트"""
         self.config = new_config
         
-        # 핸들러 재초기화
-        self.handlers = {
-            NotificationChannel.EMAIL: EmailNotificationHandler(self.config),
-            NotificationChannel.SLACK: SlackNotificationHandler(self.config),
-            NotificationChannel.WEBHOOK: WebhookNotificationHandler(self.config)
+        # SMS 핸들러 클래스 추가
+        
+class SMSNotificationHandler:
+    """SMS 알림 핸들러 (AWS SNS 기반)"""
+    
+    def __init__(self, config: SMSConfig):
+        self.config = config
+        self.sns_client = self._init_sns_client()
+        
+        # 메시지 템플릿
+        self.templates = {
+            "approval_request": (
+                "[MMCODE] 보안 승인 요청\n"
+                "작업: {action_type}\n"
+                "대상: {target}\n"
+                "위험도: {risk_level}\n"
+                "요청자: {requested_by}\n"
+                "만료: {timeout_at}\n"
+                "승인: {approval_url}"
+            ),
+            "approval_result": (
+                "[MMCODE] 승인 완료\n"
+                "요청ID: {request_id}\n"
+                "결과: {status}\n"
+                "승인자: {approver}"
+            ),
+            "timeout_warning": (
+                "[MMCODE] 승인 만료 경고\n"
+                "요청ID: {request_id}\n"
+                "남은시간: {remaining_minutes}분\n"
+                "즉시 처리 필요"
+            ),
+            "security_alert": (
+                "[MMCODE] 🚨 보안 경고\n"
+                "유형: {alert_type}\n"
+                "심각도: {severity}\n"
+                "즉시 확인 필요"
+            )
+        }
+    
+    def _init_sns_client(self):
+        """AWS SNS 클라이언트 초기화"""
+        try:
+            import boto3
+            
+            if self.config.aws_access_key_id:
+                return boto3.client(
+                    'sns',
+                    region_name=self.config.aws_region,
+                    aws_access_key_id=self.config.aws_access_key_id,
+                    aws_secret_access_key=self.config.aws_secret_access_key
+                )
+            else:
+                # IAM 역할 사용 (EC2/ECS 환경)
+                return boto3.client('sns', region_name=self.config.aws_region)
+        except ImportError:
+            logger.warning("boto3 not installed, SMS functionality disabled")
+            return None
+    
+    async def send_notification(
+        self,
+        request: ApprovalRequest,
+        notification_type: str
+    ) -> bool:
+        """
+        SMS 알림 발송
+        
+        Args:
+            request: 승인 요청
+            notification_type: 알림 유형
+            
+        Returns:
+            bool: 발송 성공 여부
+        """
+        try:
+            if not self.sns_client:
+                logger.warning("SNS client not available, skipping SMS notification")
+                return False
+            
+            # 수신자 전화번호 조회
+            phone_number = self._get_recipient_phone(request)
+            if not phone_number:
+                logger.warning(
+                    f"No phone number configured for role "
+                    f"{request.required_approver_role}"
+                )
+                return False
+            
+            # 메시지 생성
+            message = self._generate_message(request, notification_type)
+            
+            # SMS 발송
+            await self._send_sms(phone_number, message)
+            
+            logger.info(
+                f"SMS notification sent for request {request.request_id} "
+                f"to {self._mask_phone(phone_number)}"
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send SMS notification: {str(e)}")
+            return False
+    
+    def _get_recipient_phone(self, request: ApprovalRequest) -> Optional[str]:
+        """역할에 따른 수신자 전화번호 조회"""
+        return self.config.approver_phones.get(request.required_approver_role)
+    
+    def _generate_message(
+        self,
+        request: ApprovalRequest,
+        notification_type: str
+    ) -> str:
+        """SMS 메시지 생성 (160자 제한 고려)"""
+        template = self.templates.get(notification_type, "")
+        
+        # 템플릿 변수 치환
+        message = template.format(
+            request_id=request.request_id[:8],  # 짧게 자름
+            action_type=request.action.action_type,
+            target=self._truncate(request.action.target, 20),
+            risk_level=request.risk_assessment.risk_level.value.upper(),
+            requested_by=request.requested_by,
+            timeout_at=request.timeout_at.strftime("%m/%d %H:%M"),
+            approval_url=self._generate_approval_url(request),
+            status=request.status.value if hasattr(request, 'status') else 'N/A',
+            approver=getattr(request, 'approved_by', 'N/A')
+        )
+        
+        # 160자 제한 (SMS 1건 기준)
+        if len(message) > 160:
+            message = message[:157] + "..."
+        
+        return message
+    
+    def _truncate(self, text: str, max_len: int) -> str:
+        """텍스트 자르기"""
+        if not text:
+            return "N/A"
+        return text[:max_len-2] + ".." if len(text) > max_len else text
+    
+    def _generate_approval_url(self, request: ApprovalRequest) -> str:
+        """짧은 승인 URL 생성"""
+        # 실제 구현에서는 URL 단축 서비스 사용 권장
+        base_url = os.getenv("APPROVAL_BASE_URL", "https://sec.mmcode.ai")
+        return f"{base_url}/a/{request.request_id[:8]}"
+    
+    def _mask_phone(self, phone: str) -> str:
+        """전화번호 마스킹 (로그용)"""
+        if len(phone) > 4:
+            return phone[:-4] + "****"
+        return "****"
+    
+    async def _send_sms(self, phone_number: str, message: str) -> Dict[str, Any]:
+        """
+        AWS SNS를 통한 SMS 발송
+        
+        국제 전화번호 형식 필요: +821012345678
+        """
+        import asyncio
+        
+        def send_sync():
+            return self.sns_client.publish(
+                PhoneNumber=phone_number,
+                Message=message,
+                MessageAttributes={
+                    'AWS.SNS.SMS.SenderID': {
+                        'DataType': 'String',
+                        'StringValue': self.config.sender_id
+                    },
+                    'AWS.SNS.SMS.SMSType': {
+                        'DataType': 'String',
+                        'StringValue': self.config.message_type
+                    },
+                    'AWS.SNS.SMS.MaxPrice': {
+                        'DataType': 'String',
+                        'StringValue': self.config.max_price
+                    }
+                }
+            )
+        
+        # 비동기 실행
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, send_sync)
+        
+        return {
+            'message_id': response.get('MessageId'),
+            'status': 'sent'
         }

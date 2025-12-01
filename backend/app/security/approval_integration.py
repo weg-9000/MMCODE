@@ -14,6 +14,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,19 @@ from .notifications import NotificationManager, NotificationConfig
 from ..tools.base import ToolResult, BaseSecurityTool
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExecutionResult:
+    """실행 결과"""
+    success: bool
+    action_id: str
+    status: str  # "completed", "failed", "denied", "pending_approval"
+    message: str = ""
+    findings: List[Any] = field(default_factory=list)
+    execution_time: float = 0.0
+    approval_request_id: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
 
 
 class ApprovalIntegrationManager:
@@ -171,6 +185,195 @@ class ApprovalIntegrationManager:
             logger.error(f"Failed to request approval: {str(e)}")
             raise
     
+    async def execute_with_approval(
+        self,
+        action: SecurityAction,
+        tool_executor: BaseSecurityTool,
+        session_id: str
+    ) -> 'ExecutionResult':
+        """
+        승인이 필요한 작업 실행 (핵심 통합 메서드)
+        
+        Flow:
+        1. 승인 필요 여부 확인
+        2. 필요시 승인 요청 생성 및 대기
+        3. 승인 완료 후 도구 실행
+        4. 감사 로그 기록
+        
+        Args:
+            action: 실행할 보안 작업
+            tool_executor: 보안 도구 실행기
+            session_id: 세션 식별자
+            
+        Returns:
+            ExecutionResult: 실행 결과
+        """
+        try:
+            # Step 1: 승인 필요 여부 확인
+            requires_approval = await self.check_approval_required(action)
+            
+            if requires_approval:
+                # Step 2: 승인 요청 생성
+                approval_request = await self.approval_workflow.request_approval(
+                    action=action,
+                    requested_by=f"session_{session_id}",
+                    justification=f"Automated security task: {action.action_type}"
+                )
+                
+                # Step 3: 알림 발송
+                await self.notification_manager.send_approval_notification(
+                    approval_request
+                )
+                
+                # Step 4: 승인 대기 (비동기)
+                approval_status = await self._wait_for_approval(
+                    approval_request,
+                    timeout_seconds=action.parameters.get('timeout_seconds', 3600)
+                )
+                
+                if approval_status.value != 'approved':
+                    return ExecutionResult(
+                        success=False,
+                        action_id=action.action_id,
+                        status="denied",
+                        message=f"Approval {approval_status.value}",
+                        approval_request_id=approval_request.request_id
+                    )
+            
+            # Step 5: 도구 실행
+            result = await tool_executor.execute(action.target, action.parameters)
+            
+            # Step 6: 감사 로그
+            await self._log_execution(action, result, session_id)
+            
+            return ExecutionResult(
+                success=result.success,
+                action_id=action.action_id,
+                status="completed" if result.success else "failed",
+                message=result.output if hasattr(result, 'output') else str(result),
+                findings=result.findings if hasattr(result, 'findings') else [],
+                execution_time=result.execution_time if hasattr(result, 'execution_time') else 0
+            )
+            
+        except Exception as e:
+            logger.error(f"Execution with approval failed: {e}")
+            await self._handle_execution_error(action, e, session_id)
+            raise
+
+    async def _wait_for_approval(
+        self,
+        request: ApprovalRequest,
+        timeout_seconds: int = 3600
+    ) -> 'ApprovalResult':
+        """
+        승인 대기 (폴링 방식)
+        
+        구현 옵션:
+        - Option A: 폴링 (현재 구현)
+        - Option B: WebSocket (향후 개선)
+        - Option C: Redis Pub/Sub (분산 환경)
+        """
+        poll_interval = 5  # 5초마다 확인
+        elapsed = 0
+        
+        while elapsed < timeout_seconds:
+            status = await self.approval_workflow.check_request_status(
+                request.request_id
+            )
+            
+            if status.value != 'pending':
+                return status
+            
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        
+        # 타임아웃 처리
+        await self.approval_workflow.timeout_request(request.request_id)
+        from .approval_workflow import ApprovalResult
+        return ApprovalResult.TIMEOUT
+
+    async def _log_execution(self, action: SecurityAction, result, session_id: str):
+        """실행 결과 로깅"""
+        try:
+            logger.info(
+                f"Action executed: {action.action_id} in session {session_id} -> "
+                f"success={getattr(result, 'success', False)}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to log execution: {e}")
+
+    async def _handle_execution_error(self, action: SecurityAction, error: Exception, session_id: str):
+        """실행 오류 처리"""
+        try:
+            logger.error(
+                f"Action {action.action_id} failed in session {session_id}: {error}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to handle execution error: {e}")
+
+    async def batch_execute_with_approval(
+        self,
+        actions: List[SecurityAction],
+        tool_executor: BaseSecurityTool,
+        session_id: str,
+        batch_approval: bool = True
+    ) -> List['ExecutionResult']:
+        """
+        배치 작업 승인 및 실행
+        
+        Args:
+            actions: 실행할 작업 목록
+            tool_executor: 보안 도구 실행기
+            session_id: 세션 식별자
+            batch_approval: True면 일괄 승인, False면 개별 승인
+        """
+        if batch_approval:
+            # 가장 높은 위험도로 일괄 승인 요청
+            max_risk = max(a.risk_level for a in actions)
+            batch_action = SecurityAction(
+                action_id=generate_action_id(),
+                action_type="batch_execution",
+                risk_level=max_risk,
+                parameters={"batch_size": len(actions)}
+            )
+            
+            # Mock executor for approval check only
+            class MockExecutor:
+                async def execute(self, target, params):
+                    class MockResult:
+                        success = True
+                    return MockResult()
+            
+            approval = await self.execute_with_approval(
+                batch_action, 
+                MockExecutor(),
+                session_id
+            )
+            
+            if not approval.success:
+                return [ExecutionResult(
+                    success=False,
+                    action_id=a.action_id,
+                    status="batch_denied",
+                    message="Batch approval denied"
+                ) for a in actions]
+        
+        # 개별 실행
+        results = []
+        for action in actions:
+            try:
+                result = await self.execute_with_approval(action, tool_executor, session_id)
+                results.append(result)
+            except Exception as e:
+                results.append(ExecutionResult(
+                    success=False,
+                    action_id=action.action_id,
+                    status="failed",
+                    message=str(e)
+                ))
+        
+        return results
+
     async def execute_with_approval_check(
         self,
         tool: BaseSecurityTool,
@@ -493,12 +696,32 @@ class SecurityToolWrapper:
             logger.warning(f"Skipping approval check for {self.tool.tool_name}")
             return await self.tool.execute(target, options)
         
-        return await self.approval_manager.execute_with_approval_check(
-            tool=self.tool,
+        # Convert to SecurityAction
+        action = SecurityAction(
+            action_id=generate_action_id(),
+            action_type=f"{self.tool.tool_name}_execution",
             target=target,
-            options=options,
-            requested_by=self.requested_by,
-            justification=justification
+            tool_name=self.tool.tool_name,
+            parameters=options or {},
+            risk_level=options.get('risk_level', RiskLevel.LOW)
+        )
+        
+        result = await self.approval_manager.execute_with_approval(
+            action=action,
+            tool_executor=self.tool,
+            session_id=options.get('session_id', 'default')
+        )
+        
+        # Convert ExecutionResult back to ToolResult format
+        return self._convert_to_tool_result(result)
+    
+    def _convert_to_tool_result(self, execution_result: 'ExecutionResult') -> ToolResult:
+        """Convert ExecutionResult to ToolResult"""
+        return ToolResult(
+            success=execution_result.success,
+            output=execution_result.message,
+            findings=execution_result.findings,
+            execution_time=execution_result.execution_time
         )
     
     def __getattr__(self, name):
