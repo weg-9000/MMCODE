@@ -52,6 +52,9 @@ class NotificationConfig:
     # Approver mappings
     approver_contacts: Dict[str, Dict[str, str]] = None  # role -> {email, slack_user_id, phone}
     
+    # SMS 설정 (선택적)
+    sms_config: Optional['SMSConfig'] = None
+    
     def __post_init__(self):
         if self.webhook_urls is None:
             self.webhook_urls = []
@@ -652,6 +655,11 @@ class NotificationManager:
             NotificationChannel.SLACK: SlackNotificationHandler(self.config),
             NotificationChannel.WEBHOOK: WebhookNotificationHandler(self.config)
         }
+        
+        # SMS 핸들러 추가 (옵션)
+        sms_config = getattr(self.config, 'sms_config', None)
+        if sms_config:
+            self.handlers[NotificationChannel.SMS] = SMSNotificationHandler(sms_config)
     
     async def send_notification(
         self,

@@ -194,11 +194,12 @@ class ApprovalIntegrationManager:
         """
         승인이 필요한 작업 실행 (핵심 통합 메서드)
         
-        Flow:
+        Enhanced Flow:
         1. 승인 필요 여부 확인
         2. 필요시 승인 요청 생성 및 대기
         3. 승인 완료 후 도구 실행
         4. 감사 로그 기록
+        5. 강화된 에러 핸들링
         
         Args:
             action: 실행할 보안 작업
@@ -208,57 +209,146 @@ class ApprovalIntegrationManager:
         Returns:
             ExecutionResult: 실행 결과
         """
+        start_time = datetime.now(timezone.utc)
+        approval_request_id = None
+        
         try:
+            logger.info(f"Starting execution for action {action.action_id} in session {session_id}")
+            
             # Step 1: 승인 필요 여부 확인
             requires_approval = await self.check_approval_required(action)
+            logger.info(f"Action {action.action_id} requires approval: {requires_approval}")
             
             if requires_approval:
                 # Step 2: 승인 요청 생성
                 approval_request = await self.approval_workflow.request_approval(
                     action=action,
                     requested_by=f"session_{session_id}",
-                    justification=f"Automated security task: {action.action_type}"
+                    justification=f"Automated security task: {action.action_type}",
+                    context={
+                        "session_id": session_id,
+                        "target": action.target,
+                        "tool": action.tool_name,
+                        "risk_level": action.risk_level.value if action.risk_level else "unknown"
+                    }
                 )
+                approval_request_id = approval_request.request_id
                 
-                # Step 3: 알림 발송
-                await self.notification_manager.send_approval_notification(
-                    approval_request
-                )
+                logger.info(f"Created approval request {approval_request_id} for action {action.action_id}")
+                
+                # Step 3: 알림 발송 (with error handling)
+                try:
+                    await self.notification_manager.send_approval_notification(approval_request)
+                    logger.info(f"Notification sent for approval request {approval_request_id}")
+                except Exception as notification_error:
+                    logger.warning(f"Failed to send notification for {approval_request_id}: {notification_error}")
+                    # Continue execution - notification failure shouldn't block approval
                 
                 # Step 4: 승인 대기 (비동기)
+                timeout_seconds = action.parameters.get('timeout_seconds', 3600)
+                logger.info(f"Waiting for approval {approval_request_id} (timeout: {timeout_seconds}s)")
+                
                 approval_status = await self._wait_for_approval(
                     approval_request,
-                    timeout_seconds=action.parameters.get('timeout_seconds', 3600)
+                    timeout_seconds=timeout_seconds
                 )
                 
+                logger.info(f"Approval status for {approval_request_id}: {approval_status.value}")
+                
                 if approval_status.value != 'approved':
+                    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
                     return ExecutionResult(
                         success=False,
                         action_id=action.action_id,
                         status="denied",
-                        message=f"Approval {approval_status.value}",
-                        approval_request_id=approval_request.request_id
+                        message=f"Approval {approval_status.value}: {approval_request.denial_reason if hasattr(approval_request, 'denial_reason') else 'No reason provided'}",
+                        approval_request_id=approval_request_id,
+                        execution_time=execution_time
                     )
             
-            # Step 5: 도구 실행
+            # Step 5: 도구 실행 (with enhanced logging)
+            logger.info(f"Executing tool {action.tool_name} for action {action.action_id}")
+            
+            # Validate target and parameters before execution
+            if not action.target:
+                raise ValueError("Target cannot be empty")
+                
+            if not action.parameters:
+                action.parameters = {}
+            
             result = await tool_executor.execute(action.target, action.parameters)
             
-            # Step 6: 감사 로그
-            await self._log_execution(action, result, session_id)
+            logger.info(f"Tool execution completed: success={result.success}, findings={len(result.findings)}")
+            
+            # Step 6: 감사 로그 (enhanced)
+            await self._log_execution(action, result, session_id, approval_request_id)
+            
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             
             return ExecutionResult(
                 success=result.success,
                 action_id=action.action_id,
                 status="completed" if result.success else "failed",
-                message=result.output if hasattr(result, 'output') else str(result),
+                message=self._format_result_message(result),
                 findings=result.findings if hasattr(result, 'findings') else [],
-                execution_time=result.execution_time if hasattr(result, 'execution_time') else 0
+                execution_time=execution_time,
+                approval_request_id=approval_request_id
+            )
+            
+        except asyncio.TimeoutError:
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            error_msg = f"Execution timeout after {execution_time:.1f}s for action {action.action_id}"
+            logger.error(error_msg)
+            
+            await self._handle_execution_error(action, TimeoutError(error_msg), session_id, approval_request_id)
+            
+            return ExecutionResult(
+                success=False,
+                action_id=action.action_id,
+                status="timeout",
+                message=error_msg,
+                execution_time=execution_time,
+                approval_request_id=approval_request_id,
+                error_details={"error_type": "timeout", "timeout_duration": execution_time}
+            )
+            
+        except PermissionError as e:
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            error_msg = f"Permission denied for action {action.action_id}: {str(e)}"
+            logger.error(error_msg)
+            
+            await self._handle_execution_error(action, e, session_id, approval_request_id)
+            
+            return ExecutionResult(
+                success=False,
+                action_id=action.action_id,
+                status="permission_denied",
+                message=error_msg,
+                execution_time=execution_time,
+                approval_request_id=approval_request_id,
+                error_details={"error_type": "permission", "details": str(e)}
             )
             
         except Exception as e:
-            logger.error(f"Execution with approval failed: {e}")
-            await self._handle_execution_error(action, e, session_id)
-            raise
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            error_msg = f"Execution failed for action {action.action_id}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            await self._handle_execution_error(action, e, session_id, approval_request_id)
+            
+            return ExecutionResult(
+                success=False,
+                action_id=action.action_id,
+                status="error",
+                message=error_msg,
+                execution_time=execution_time,
+                approval_request_id=approval_request_id,
+                error_details={
+                    "error_type": type(e).__name__,
+                    "details": str(e),
+                    "session_id": session_id
+                }
+            )
 
     async def _wait_for_approval(
         self,
@@ -292,24 +382,65 @@ class ApprovalIntegrationManager:
         from .approval_workflow import ApprovalResult
         return ApprovalResult.TIMEOUT
 
-    async def _log_execution(self, action: SecurityAction, result, session_id: str):
-        """실행 결과 로깅"""
+    async def _log_execution(self, action: SecurityAction, result, session_id: str, approval_request_id: str = None):
+        """Enhanced execution result logging"""
         try:
-            logger.info(
-                f"Action executed: {action.action_id} in session {session_id} -> "
-                f"success={getattr(result, 'success', False)}"
-            )
+            log_data = {
+                "action_id": action.action_id,
+                "session_id": session_id,
+                "tool_name": action.tool_name,
+                "target": action.target,
+                "success": getattr(result, 'success', False),
+                "findings_count": len(getattr(result, 'findings', [])),
+                "execution_time": getattr(result, 'execution_time', 0),
+                "approval_request_id": approval_request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.info(f"Action execution completed: {log_data}")
+            
+            # TODO: Store in security audit log table
+            # This would be implemented when database integration is complete
+            
         except Exception as e:
             logger.error(f"Failed to log execution: {e}")
 
-    async def _handle_execution_error(self, action: SecurityAction, error: Exception, session_id: str):
-        """실행 오류 처리"""
+    async def _handle_execution_error(self, action: SecurityAction, error: Exception, session_id: str, approval_request_id: str = None):
+        """Enhanced execution error handling"""
         try:
-            logger.error(
-                f"Action {action.action_id} failed in session {session_id}: {error}"
-            )
+            error_data = {
+                "action_id": action.action_id,
+                "session_id": session_id,
+                "tool_name": action.tool_name,
+                "target": action.target,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "approval_request_id": approval_request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.error(f"Action execution error: {error_data}")
+            
+            # TODO: Store in security audit log table with error details
+            # This would be implemented when database integration is complete
+            
         except Exception as e:
             logger.error(f"Failed to handle execution error: {e}")
+
+    def _format_result_message(self, result) -> str:
+        """Format tool result into readable message"""
+        try:
+            if hasattr(result, 'output') and result.output:
+                return result.output
+            elif hasattr(result, 'findings') and result.findings:
+                return f"Completed with {len(result.findings)} findings"
+            elif hasattr(result, 'success') and result.success:
+                return "Execution completed successfully"
+            else:
+                return str(result)
+        except Exception as e:
+            logger.warning(f"Failed to format result message: {e}")
+            return "Execution completed"
 
     async def batch_execute_with_approval(
         self,
