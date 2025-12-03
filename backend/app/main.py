@@ -266,8 +266,12 @@ def _get_health_recommendations(db_health: dict, db_performance: dict, system_he
     return recommendations
 
 # API router registration
-from app.api.v1 import sessions, agents, orchestration, a2a, security
+from app.api.v1 import sessions, agents, orchestration, a2a, security, auth
 
+# Authentication routes (no auth required)
+app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["authentication"])
+
+# Protected routes (require authentication)
 app.include_router(sessions.router, prefix=f"{settings.API_PREFIX}/sessions", tags=["sessions"])
 app.include_router(agents.router, prefix=f"{settings.API_PREFIX}/agents", tags=["agents"])
 app.include_router(orchestration.router, prefix=f"{settings.API_PREFIX}/orchestrate", tags=["orchestration"])

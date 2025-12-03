@@ -16,6 +16,7 @@ from app.schemas.session import (
     SessionCreate, SessionUpdate, SessionResponse, SessionStatus,
     RequirementAnalysisRequest, AnalysisResponse, OrchestrationRequest, OrchestrationResponse
 )
+from app.security.authentication import get_current_user, User, log_security_event, require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,6 +25,7 @@ router = APIRouter()
 @router.post("/", response_model=SessionResponse)
 async def create_session(
     session_data: SessionCreate,
+    current_user: User = Depends(require_permission("sessions:write")),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new session with timeout protection"""
@@ -31,16 +33,23 @@ async def create_session(
         import asyncio
         # Add timeout protection for session creation
         async with asyncio.timeout(10):  # 10 second timeout
-            # Create new session
+            # Create new session with user context
             new_session = Session(
                 title=session_data.title,
                 description=session_data.description,
-                requirements_text=session_data.requirements_text
+                requirements_text=session_data.requirements_text,
+                user_id=current_user.id  # Add user context for RLS
             )
             
             db.add(new_session)
             await db.commit()
             await db.refresh(new_session)
+            
+            # Log security event
+            await log_security_event(
+                db=db, user=current_user, event_type="session_created",
+                target=f"session:{new_session.id}", result="success"
+            )
             
             logger.info(f"Created session {new_session.id}: {new_session.title}")
             return new_session
