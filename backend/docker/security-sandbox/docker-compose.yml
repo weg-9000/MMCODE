@@ -1,0 +1,256 @@
+# MMCODE Security Sandbox Docker Compose Configuration
+# ===================================================
+#
+# Orchestrates the security tool sandbox environment with:
+# - Network isolation and controlled access
+# - Resource limits and monitoring
+# - Volume mounts for results and configurations
+# - Security constraints and user namespace mapping
+
+version: '3.8'
+
+services:
+  # Main security tool sandbox
+  mmcode-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SANDBOX_UID: 1001
+        SANDBOX_GID: 1001
+    image: mmcode/security-sandbox:1.0.0
+    container_name: mmcode-security-sandbox
+    hostname: mmcode-sandbox
+    
+    # Security configuration
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    
+    # Resource limits
+    mem_limit: 2g
+    mem_reservation: 512m
+    cpus: '2.0'
+    pids_limit: 200
+    
+    # User namespace mapping
+    user: "1001:1001"
+    
+    # Read-only root filesystem with specific writable mounts
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=512m
+      - /var/tmp:noexec,nosuid,size=256m
+      - /run:noexec,nosuid,size=128m
+    
+    # Volume mounts
+    volumes:
+      # Results output (writable)
+      - type: bind
+        source: ${PWD}/results
+        target: /tmp/scan-results
+        bind:
+          propagation: rshared
+      
+      # Configuration files (read-only)
+      - type: bind
+        source: ${PWD}/configs
+        target: /etc/mmcode-sandbox
+        read_only: true
+      
+      # Tool scripts (read-only)
+      - type: bind
+        source: ${PWD}/scripts
+        target: /opt/security-tools
+        read_only: true
+      
+      # Nuclei templates (read-only)
+      - nuclei_templates:/home/mmcode-runner/nuclei-templates:ro
+    
+    # Network configuration
+    networks:
+      - sandbox_network
+    
+    # Environment variables
+    environment:
+      - MMCODE_SANDBOX_MODE=production
+      - MMCODE_LOG_LEVEL=INFO
+      - MMCODE_MAX_SCAN_TIME=3600
+      - MMCODE_MAX_TARGETS=256
+      - MMCODE_ENABLE_MONITORING=true
+      - PYTHONUNBUFFERED=1
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+        labels: "service,version"
+    
+    # Labels for identification and management
+    labels:
+      com.mmcode.service: "security-sandbox"
+      com.mmcode.version: "1.0.0"
+      com.mmcode.environment: "production"
+      com.mmcode.security.isolation: "high"
+      com.mmcode.monitoring: "enabled"
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check override
+    healthcheck:
+      test: ["CMD", "python3", "/opt/security-tools/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Network monitor for sandbox oversight
+  network-monitor:
+    image: nicolaka/netshoot:latest
+    container_name: mmcode-network-monitor
+    hostname: network-monitor
+    
+    # Security configuration
+    security_opt:
+      - no-new-privileges:true
+    
+    # Resource limits
+    mem_limit: 256m
+    cpus: '0.5'
+    
+    # Network access
+    networks:
+      - sandbox_network
+      - monitoring_network
+    
+    # Network monitoring command
+    command: |
+      sh -c '
+        echo "Starting network monitoring for MMCODE sandbox..."
+        while true; do
+          echo "=== Network Monitor Report $(date) ==="
+          echo "Active connections:"
+          netstat -tulnp 2>/dev/null || ss -tulnp 2>/dev/null
+          echo "Network interfaces:"
+          ip addr show 2>/dev/null || ifconfig 2>/dev/null
+          echo "Routing table:"
+          ip route 2>/dev/null || route -n 2>/dev/null
+          echo "=================================="
+          sleep 60
+        done
+      '
+    
+    # Volume for logs
+    volumes:
+      - type: bind
+        source: ${PWD}/monitoring
+        target: /monitoring
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+    
+    labels:
+      com.mmcode.service: "network-monitor"
+      com.mmcode.type: "monitoring"
+    
+    restart: unless-stopped
+
+  # Resource monitor
+  resource-monitor:
+    image: prom/node-exporter:latest
+    container_name: mmcode-resource-monitor
+    hostname: resource-monitor
+    
+    # Security configuration
+    security_opt:
+      - no-new-privileges:true
+    
+    # Resource limits
+    mem_limit: 128m
+    cpus: '0.2'
+    
+    # Monitor host resources
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    
+    # Network
+    networks:
+      - monitoring_network
+    
+    # Command override for container monitoring
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points'
+      - '^/(sys|proc|dev|host|etc)($$|/)'
+    
+    labels:
+      com.mmcode.service: "resource-monitor"
+      com.mmcode.type: "monitoring"
+    
+    restart: unless-stopped
+
+# Network definitions
+networks:
+  # Isolated network for sandbox
+  sandbox_network:
+    driver: bridge
+    name: mmcode-sandbox-net
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1
+    driver_opts:
+      com.docker.network.bridge.name: mmcode-sandbox0
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+    labels:
+      com.mmcode.network: "sandbox"
+      com.mmcode.isolation: "high"
+  
+  # Monitoring network
+  monitoring_network:
+    driver: bridge
+    name: mmcode-monitor-net
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/24
+          gateway: 172.21.0.1
+    labels:
+      com.mmcode.network: "monitoring"
+
+# Volume definitions
+volumes:
+  nuclei_templates:
+    driver: local
+    name: mmcode-nuclei-templates
+    labels:
+      com.mmcode.volume: "nuclei-templates"
+      com.mmcode.type: "readonly-data"
+
+# Shared configurations
+x-common-config: &common-security
+  security_opt:
+    - no-new-privileges:true
+    - apparmor:docker-default
+  
+x-common-logging: &common-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "3"
