@@ -1,4 +1,4 @@
-# MMCODE (DevStrategist AI)
+# MMCODE
 
 AI-powered development strategy automation and security assessment platform with multi-agent orchestration.
 
