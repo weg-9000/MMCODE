@@ -21,15 +21,16 @@ class Base(DeclarativeBase):
 # Database configuration
 def get_database_url() -> str:
     """Get database URL from environment or default to SQLite"""
-    # Try to get from environment
-    database_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_URL")
-    
+    # Try to get DATABASE_URL from environment (must be a valid PostgreSQL connection string)
+    # Note: Do NOT use SUPABASE_URL as fallback - it's an HTTPS API endpoint, not a database URL
+    database_url = os.getenv("DATABASE_URL")
+
     if database_url:
         # Convert PostgreSQL URL to async version if needed
         if database_url.startswith("postgresql://"):
             database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
         return database_url
-    
+
     # Default to SQLite for development
     return "sqlite+aiosqlite:///./devstrategist.db"
 

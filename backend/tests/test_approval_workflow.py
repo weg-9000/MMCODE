@@ -79,10 +79,9 @@ class TestApprovalWorkflow:
             tool_name="metasploit",
             method="reverse_shell",
             phase=PentestPhase.EXPLOITATION,
-            requires_approval=True,
             risk_level=RiskLevel.HIGH,
-            justification="Testing critical vulnerability CVE-2021-44228",
-            requested_by="security_analyst_1"
+            is_destructive=True,
+            created_by="security_analyst_1"
         )
 
     @pytest.fixture
@@ -95,10 +94,9 @@ class TestApprovalWorkflow:
             tool_name="nmap",
             method="tcp_scan",
             phase=PentestPhase.SCANNING,
-            requires_approval=False,
             risk_level=RiskLevel.LOW,
-            justification="Network discovery scan",
-            requested_by="security_analyst_1"
+            is_destructive=False,
+            created_by="security_analyst_1"
         )
 
     @pytest.mark.asyncio
@@ -147,7 +145,7 @@ class TestApprovalWorkflow:
         # Verify approval workflow was executed
         assert result.success is True
         assert result.status == "completed"
-        assert result.approval_request_id == "approval_123"
+        assert result.approval_request_id is not None  # ID will be auto-generated
         assert len(result.findings) > 0
         assert result.execution_time > 0
         
@@ -466,8 +464,9 @@ class TestApprovalWorkflow:
                 tool_name="metasploit",
                 method="reverse_shell",
                 phase=PentestPhase.EXPLOITATION,
-                requires_approval=True,
-                risk_level=RiskLevel.HIGH
+                risk_level=RiskLevel.HIGH,
+                is_destructive=True,
+                created_by=f"analyst_{i}"
             )
             for i in range(3)
         ]

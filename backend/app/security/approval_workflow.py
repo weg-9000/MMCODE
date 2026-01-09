@@ -94,7 +94,7 @@ class ApprovalRequest:
     notified_approvers: List[str] = field(default_factory=list)
     
     # 결과
-    approved_by: Optional[str] = None
+    approver_id: Optional[str] = None
     approved_at: Optional[datetime] = None
     denial_reason: Optional[str] = None
     approval_conditions_accepted: List[str] = field(default_factory=list)
@@ -675,7 +675,7 @@ class ApprovalWorkflow:
             # 3. 승인 처리
             if approved:
                 request.status = ApprovalResult.APPROVED
-                request.approved_by = approver_id
+                request.approver_id = approver_id
                 request.approved_at = datetime.now(timezone.utc)
                 request.approval_conditions_accepted = conditions_accepted or []
                 
@@ -788,7 +788,7 @@ class ApprovalWorkflow:
                     
                     return HumanApproval(
                         granted=True,
-                        approver=request.approved_by,
+                        approver=request.approver_id,
                         approved_at=request.approved_at,
                         conditions=request.approval_conditions_accepted,
                         expires_at=request.timeout_at
@@ -861,7 +861,7 @@ class ApprovalWorkflow:
             risk_assessment=risk_assessment,
             requested_by=requested_by,
             status=ApprovalResult.APPROVED,
-            approved_by="system",
+            approver_id="system",
             approved_at=datetime.now(timezone.utc),
             justification="Auto-approved based on low risk assessment"
         )
@@ -887,7 +887,7 @@ class ApprovalWorkflow:
             approval_conditions=request.approval_conditions,
             timeout_at=request.timeout_at,
             status=request.status.value,
-            approved_by=request.approved_by,
+            approver_id=request.approver_id,
             approved_at=request.approved_at,
             denial_reason=request.denial_reason
         )
@@ -902,7 +902,7 @@ class ApprovalWorkflow:
             .where(DBHumanApproval.id == request.request_id)
             .values(
                 status=request.status.value,
-                approved_by=request.approved_by,
+                approver_id=request.approver_id,
                 approved_at=request.approved_at,
                 denial_reason=request.denial_reason,
                 approval_conditions_accepted=request.approval_conditions_accepted

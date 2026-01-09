@@ -289,32 +289,39 @@ class SecurityEnforcedRepository:
 
 class MockUserService:
     """Mock user service for demonstration - replace with real implementation"""
-    
+
     def __init__(self):
-        # In production, store these in database with proper hashing
-        self.users = {
-            "admin@mmcode.ai": {
-                "id": "admin-001",
-                "email": "admin@mmcode.ai",
-                "hashed_password": auth_manager.get_password_hash("admin123"),
-                "role": "admin",
-                "is_active": True
-            },
-            "user@mmcode.ai": {
-                "id": "user-001", 
-                "email": "user@mmcode.ai",
-                "hashed_password": auth_manager.get_password_hash("user123"),
-                "role": "user",
-                "is_active": True
-            },
-            "analyst@mmcode.ai": {
-                "id": "analyst-001",
-                "email": "analyst@mmcode.ai", 
-                "hashed_password": auth_manager.get_password_hash("analyst123"),
-                "role": "security_analyst",
-                "is_active": True
+        # Lazy initialization to avoid bcrypt issues at module import time
+        self._users = None
+
+    @property
+    def users(self):
+        """Lazy load users to avoid bcrypt initialization issues"""
+        if self._users is None:
+            self._users = {
+                "admin@mmcode.ai": {
+                    "id": "admin-001",
+                    "email": "admin@mmcode.ai",
+                    "hashed_password": auth_manager.get_password_hash("admin123"),
+                    "role": "admin",
+                    "is_active": True
+                },
+                "user@mmcode.ai": {
+                    "id": "user-001",
+                    "email": "user@mmcode.ai",
+                    "hashed_password": auth_manager.get_password_hash("user123"),
+                    "role": "user",
+                    "is_active": True
+                },
+                "analyst@mmcode.ai": {
+                    "id": "analyst-001",
+                    "email": "analyst@mmcode.ai",
+                    "hashed_password": auth_manager.get_password_hash("analyst123"),
+                    "role": "security_analyst",
+                    "is_active": True
+                }
             }
-        }
+        return self._users
     
     async def authenticate_user(self, email: str, password: str) -> Optional[User]:
         """Authenticate user with email/password"""

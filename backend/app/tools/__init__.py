@@ -14,17 +14,18 @@ from .base import BaseSecurityTool, ToolResult, ToolError
 from .network import NmapTool, MasscanTool
 from .vulnerability import NucleiTool, ZapTool
 from .enumeration import GobusterTool, AmassTools
-from .executor import SecurityToolExecutor
+from .executor import SecurityToolExecutor, ExecutionRequest
 
 __all__ = [
     "BaseSecurityTool",
-    "ToolResult", 
+    "ToolResult",
     "ToolError",
     "NmapTool",
     "MasscanTool",
     "NucleiTool",
-    "ZapTool", 
+    "ZapTool",
     "GobusterTool",
     "AmassTools",
-    "SecurityToolExecutor"
+    "SecurityToolExecutor",
+    "ExecutionRequest"
 ]

@@ -246,7 +246,7 @@ class GobusterTool(BaseSecurityTool):
         return findings
 
 
-class AmassToolc(BaseSecurityTool):
+class AmassTools(BaseSecurityTool):
     """Amass integration for DNS enumeration and subdomain discovery"""
     
     @property

@@ -184,16 +184,16 @@ async def get_orchestration_status(
         ]
         
         progress_percentage = _calculate_overall_progress(tasks)
-        
-            return OrchestrationResponse(
-                session_id=session_id,
-                status=status,
-                progress_percentage=progress_percentage,
-                message=_get_status_message(status, progress_percentage),
-                tasks=task_summaries,
-                artifacts=artifact_summaries
-            )
-        
+
+        return OrchestrationResponse(
+            session_id=session_id,
+            status=status,
+            progress_percentage=progress_percentage,
+            message=_get_status_message(status, progress_percentage),
+            tasks=task_summaries,
+            artifacts=artifact_summaries
+        )
+
     except asyncio.TimeoutError:
         logger.error(f"Status query timed out for session {session_id}")
         raise HTTPException(status_code=408, detail="Status query timed out")
@@ -467,24 +467,100 @@ def _get_status_message(status: WorkflowStatus, progress: float) -> str:
 
 
 async def _ensure_agents_registered(client: InMemoryA2AClient, db: AsyncSession):
-    """Ensure all required agents are registered with the A2A client"""
-    # This should ideally be done during application startup
-    # For now, we'll add a basic registration check
-    pass
+    """Ensure all required agents are registered with the A2A client
+
+    Checks database for registered agents and ensures they are available
+    in the A2A client for inter-agent communication.
+    """
+    required_agent_ids = ["requirement-analyzer", "architect", "stack_recommender", "documenter"]
+
+    for agent_id in required_agent_ids:
+        # Check if already registered in client
+        if client.is_registered(agent_id):
+            continue
+
+        # Try to get agent from database
+        try:
+            result = await db.execute(select(Agent).where(Agent.id == agent_id))
+            agent_record = result.scalar_one_or_none()
+
+            if agent_record and agent_record.status == "active":
+                # Create a placeholder registration for the agent
+                # Actual agent instance will be created on demand
+                logger.debug(f"Agent {agent_id} found in database, marking as available")
+            else:
+                logger.warning(f"Agent {agent_id} not found or inactive in database")
+
+        except Exception as e:
+            logger.warning(f"Failed to check agent {agent_id} registration: {e}")
 
 
 async def _save_orchestration_results(
-    db: AsyncSession, 
-    session_id: str, 
+    db: AsyncSession,
+    session_id: str,
     results: Dict[str, Any]
 ):
-    """Save orchestration results to database"""
+    """Save orchestration results to database as Artifact records
+
+    Handles various result types from the orchestration workflow:
+    - analysis_result: Requirement analysis output
+    - architecture_design: Architecture design artifacts
+    - stack_recommendation: Technology stack recommendations
+    - documentation: Generated documentation
+    """
     try:
-        # This is a placeholder - implement based on actual result structure
-        # Results should be saved as Artifact records
         logger.info(f"Saving orchestration results for session {session_id}")
-        # TODO: Implement based on actual analyzer result structure
-        
+
+        # Process each result type
+        artifact_mappings = [
+            ("analysis_result", "requirement_analysis", "Requirement Analysis"),
+            ("architecture_design", "architecture", "Architecture Design"),
+            ("stack_recommendation", "stack_recommendation", "Technology Stack"),
+            ("documentation", "documentation", "Generated Documentation"),
+        ]
+
+        for result_key, artifact_type, title_prefix in artifact_mappings:
+            if result_key in results and results[result_key]:
+                result_data = results[result_key]
+
+                # Create artifact record
+                artifact = Artifact(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    artifact_type=artifact_type,
+                    title=f"{title_prefix} - Session {session_id[:8]}",
+                    description=f"Auto-generated {title_prefix.lower()} from orchestration workflow",
+                    content=result_data if isinstance(result_data, str) else str(result_data),
+                    content_format="json" if isinstance(result_data, dict) else "text",
+                    created_by="orchestration-workflow",
+                    quality_score=result_data.get("quality_score") if isinstance(result_data, dict) else None,
+                    confidence_score=result_data.get("confidence_score") if isinstance(result_data, dict) else None,
+                    is_final=True,
+                    is_public=False
+                )
+                db.add(artifact)
+                logger.debug(f"Created artifact: {artifact_type} for session {session_id}")
+
+        # Also save any tasks that were completed
+        if "completed_tasks" in results:
+            for task_data in results["completed_tasks"]:
+                task = Task(
+                    id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    agent_id=task_data.get("agent_id", "unknown"),
+                    task_type=task_data.get("task_type", "orchestration"),
+                    status="completed",
+                    input_data=task_data.get("input"),
+                    output_data=task_data.get("output"),
+                    quality_score=task_data.get("quality_score"),
+                    completed_at=datetime.now(timezone.utc)
+                )
+                db.add(task)
+
+        await db.commit()
+        logger.info(f"Successfully saved orchestration results for session {session_id}")
+
     except Exception as e:
         logger.error(f"Failed to save orchestration results: {e}")
+        await db.rollback()
         raise

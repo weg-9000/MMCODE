@@ -174,3 +174,8 @@ class ArchitectAgentSettings(BaseSettings):
 
 # Global settings instance
 settings = ArchitectAgentSettings()
+
+
+def get_settings() -> ArchitectAgentSettings:
+    """Get the settings instance"""
+    return settings

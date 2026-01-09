@@ -238,7 +238,7 @@ class ApprovalIntegrationManager:
                 
                 # Step 3: 알림 발송 (with error handling)
                 try:
-                    await self.notification_manager.send_approval_notification(approval_request)
+                    await self.notification_manager.send_notification(approval_request, "approval_request")
                     logger.info(f"Notification sent for approval request {approval_request_id}")
                 except Exception as notification_error:
                     logger.warning(f"Failed to send notification for {approval_request_id}: {notification_error}")
@@ -250,7 +250,7 @@ class ApprovalIntegrationManager:
                 
                 approval_status = await self._wait_for_approval(
                     approval_request,
-                    timeout_seconds=timeout_seconds
+                    timeout=timeout_seconds
                 )
                 
                 logger.info(f"Approval status for {approval_request_id}: {approval_status.value}")

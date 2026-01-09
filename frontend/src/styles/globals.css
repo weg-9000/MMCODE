@@ -1,0 +1,213 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+  html {
+    @apply antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded-full hover:bg-gray-400;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Block node base styles */
+  .block-node {
+    @apply bg-white rounded-xl border-2 border-gray-200 shadow-block transition-all duration-200;
+    @apply hover:shadow-block-hover hover:border-gray-300;
+  }
+
+  .block-node.selected {
+    @apply shadow-block-selected border-primary-500;
+  }
+
+  .block-node.processing {
+    @apply animate-pulse-slow;
+  }
+
+  /* Block type specific borders */
+  .block-node.type-analysis {
+    @apply border-l-4 border-l-block-analysis;
+  }
+
+  .block-node.type-architecture {
+    @apply border-l-4 border-l-block-architecture;
+  }
+
+  .block-node.type-stack {
+    @apply border-l-4 border-l-block-stack;
+  }
+
+  .block-node.type-document {
+    @apply border-l-4 border-l-block-document;
+  }
+
+  /* Tech badge styles */
+  .tech-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full;
+    @apply bg-gray-100 text-gray-700 border border-gray-200;
+    @apply hover:bg-gray-200 transition-colors;
+  }
+
+  /* Quality score indicator */
+  .quality-indicator {
+    @apply inline-flex items-center gap-1 text-sm font-medium;
+  }
+
+  .quality-indicator.excellent {
+    @apply text-quality-excellent;
+  }
+
+  .quality-indicator.good {
+    @apply text-quality-good;
+  }
+
+  .quality-indicator.warning {
+    @apply text-quality-warning;
+  }
+
+  .quality-indicator.poor {
+    @apply text-quality-poor;
+  }
+
+  /* Status badge */
+  .status-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .status-badge.pending {
+    @apply bg-gray-100 text-gray-600;
+  }
+
+  .status-badge.processing {
+    @apply bg-blue-100 text-blue-700;
+  }
+
+  .status-badge.completed {
+    @apply bg-green-100 text-green-700;
+  }
+
+  .status-badge.failed {
+    @apply bg-red-100 text-red-700;
+  }
+
+  /* Canvas container */
+  .canvas-container {
+    @apply w-full h-full bg-gray-50;
+    background-image: radial-gradient(circle, #d1d5db 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Connection line styles */
+  .connection-line {
+    @apply stroke-gray-300 stroke-2;
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  .connection-line.active {
+    @apply stroke-primary-500;
+  }
+
+  /* Search input */
+  .search-input {
+    @apply w-full px-4 py-2 pl-10 text-sm border border-gray-200 rounded-lg;
+    @apply bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply placeholder-gray-400;
+  }
+
+  /* Filter dropdown */
+  .filter-dropdown {
+    @apply absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50;
+  }
+
+  /* Panel styles */
+  .detail-panel {
+    @apply bg-white border-l border-gray-200 shadow-lg overflow-hidden;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    @apply h-2 bg-gray-200 rounded-full overflow-hidden;
+  }
+
+  .progress-bar-fill {
+    @apply h-full bg-primary-500 transition-all duration-300;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    @apply animate-pulse bg-gray-200 rounded;
+  }
+}
+
+/* Utility styles */
+@layer utilities {
+  /* Glass effect */
+  .glass {
+    @apply bg-white/80 backdrop-blur-sm;
+  }
+
+  /* Gradient backgrounds */
+  .gradient-primary {
+    @apply bg-gradient-to-r from-primary-500 to-primary-600;
+  }
+
+  /* Text truncation */
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* React Flow customizations */
+.react-flow__node {
+  @apply !p-0 !border-0 !bg-transparent !shadow-none;
+}
+
+.react-flow__edge-path {
+  @apply stroke-gray-300 stroke-2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  @apply stroke-primary-500;
+}
+
+.react-flow__controls {
+  @apply !shadow-lg !border !border-gray-200 !rounded-lg overflow-hidden;
+}
+
+.react-flow__controls-button {
+  @apply !border-b !border-gray-200 hover:!bg-gray-50;
+}
+
+.react-flow__minimap {
+  @apply !shadow-lg !border !border-gray-200 !rounded-lg;
+}

@@ -7,45 +7,40 @@ from typing import Dict, Any, List, Optional, Tuple
 import asyncio
 import json
 import logging
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..models.stack_models import (
-    StackRecommendation, TechnologyChoice, StackCategory, 
+    StackRecommendation, TechnologyChoice, StackCategory,
     ArchitectureContext, StackTemplate
 )
 from ..config.settings import settings
 from ..utils.knowledge_search import KnowledgeSearcher
 from ..utils.template_matcher import TemplateMatcher
+from ..utils.compatibility_matrix import get_compatibility_matrix, CompatibilityLevel
+from app.agents.shared.utils.llm_initialization import ensure_llm_instance
 
 logger = logging.getLogger(__name__)
 
 
 class StackAnalysisEngine:
     """Core engine for analyzing requirements and recommending technology stacks"""
-    
-    def __init__(self):
-        # Initialize LLM with unified provider support
-        self._initialize_llm()
-        
-        self.knowledge_searcher = KnowledgeSearcher()
-        self.template_matcher = TemplateMatcher()
-        
-        # Setup prompts
-        self._setup_prompts()
 
-    def _initialize_llm(self):
-        """Initialize LLM with unified provider system and fallback compatibility"""
+    def __init__(self):
         # Use lazy initialization pattern to avoid event loop conflicts
         self.llm = None
         self._llm_manager = None
-        
+        self._fallback_settings = {
+            'model': settings.effective_model,
+            'temperature': settings.effective_temperature,
+            'max_tokens': settings.effective_max_tokens,
+            'api_key': settings.effective_api_key
+        }
+
+        # Try to prepare LLM manager for lazy initialization
         try:
-            # Modern: Try to use unified LLM provider system
             from app.core.llm_providers import DevStrategistLLMManager
             from app.core.config import settings as global_settings
-            
-            # Check if we have unified LLM configuration
+
             if hasattr(global_settings, 'LLM_API_KEY') and global_settings.LLM_API_KEY:
                 self._llm_manager = DevStrategistLLMManager(
                     api_key=global_settings.LLM_API_KEY,
@@ -56,43 +51,24 @@ class StackAnalysisEngine:
                     timeout=getattr(global_settings, 'LLM_TIMEOUT', 30)
                 )
                 logger.info("LLM manager prepared for lazy initialization")
-                return
-                
         except Exception as e:
-            logger.warning(f"Failed to initialize with unified provider, falling back to settings: {e}")
-        
-        # Fallback: Use enhanced settings-based initialization with unified support
-        self.llm = ChatOpenAI(
-            model=settings.effective_model,
-            temperature=settings.effective_temperature,
-            max_tokens=settings.effective_max_tokens,
-            openai_api_key=settings.effective_api_key
-        )
-        logger.info(f"LLM initialized with settings-based configuration: model={settings.effective_model}, provider=OpenAI")
-    
+            logger.warning(f"Failed to prepare LLM manager: {e}")
+
+        self.knowledge_searcher = KnowledgeSearcher()
+        self.template_matcher = TemplateMatcher()
+        self.compatibility_matrix = get_compatibility_matrix()
+
+        # Setup prompts
+        self._setup_prompts()
+
     async def _ensure_llm(self):
-        """Ensure LLM is initialized (lazy initialization)"""
-        if self.llm is None and self._llm_manager is not None:
-            try:
-                self.llm = await self._llm_manager.get_llm_instance()
-                logger.info("LLM initialized with unified provider system")
-            except Exception as e:
-                logger.warning(f"Failed to get LLM instance, falling back to settings: {e}")
-                self.llm = ChatOpenAI(
-                    model=settings.effective_model,
-                    temperature=settings.effective_temperature,
-                    max_tokens=settings.effective_max_tokens,
-                    openai_api_key=settings.effective_api_key
-                )
-        elif self.llm is None:
-            # Final fallback
-            self.llm = ChatOpenAI(
-                model=settings.effective_model,
-                temperature=settings.effective_temperature,
-                max_tokens=settings.effective_max_tokens,
-                openai_api_key=settings.effective_api_key
-            )
-    
+        """Ensure LLM is initialized (lazy initialization) using shared utility"""
+        self.llm = await ensure_llm_instance(
+            self.llm,
+            self._llm_manager,
+            self._fallback_settings
+        )
+
     def _setup_prompts(self):
         """Setup LangChain prompts for stack analysis"""
         
@@ -307,40 +283,67 @@ Return the refined recommendation in the same JSON format.
         recommendation: StackRecommendation,
         architecture: ArchitectureContext
     ) -> List[str]:
-        """Validate recommendation for common issues"""
-        
+        """Validate recommendation for common issues using compatibility matrix"""
+
         concerns = []
-        
+
         # Check if essential categories are covered
         if not recommendation.backend and "api" in architecture.domain.lower():
             concerns.append("Backend framework missing for API-centric application")
-        
+
         if not recommendation.frontend and "web" in architecture.domain.lower():
             concerns.append("Frontend framework missing for web application")
-        
+
         if not recommendation.database and any("data" in comp.lower() for comp in architecture.components):
             concerns.append("Database missing despite data-related components")
-        
-        # Check technology compatibility
-        if recommendation.backend and recommendation.database:
-            backend_names = [tech.name.lower() for tech in recommendation.backend]
-            db_names = [tech.name.lower() for tech in recommendation.database]
-            
-            # Simple compatibility checks
-            if "django" in backend_names and "mongodb" in db_names:
-                concerns.append("Django typically pairs better with PostgreSQL than MongoDB")
-        
+
+        # Collect all technologies for compatibility validation
+        all_techs = []
+        for tech in recommendation.backend:
+            all_techs.append((tech.name, tech.version))
+        for tech in recommendation.frontend:
+            all_techs.append((tech.name, tech.version))
+        for tech in recommendation.database:
+            all_techs.append((tech.name, tech.version))
+        for tech in recommendation.infrastructure:
+            all_techs.append((tech.name, tech.version))
+
+        # Use compatibility matrix for comprehensive validation
+        if len(all_techs) > 1:
+            validation_result = self.compatibility_matrix.validate_stack(all_techs)
+
+            # Add compatibility issues
+            for issue in validation_result.get("issues", []):
+                concerns.append(issue.get("message", "Compatibility issue detected"))
+
+            # Add high-priority warnings
+            for warning in validation_result.get("warnings", []):
+                if warning.get("level") == "partial":
+                    concerns.append(f"Warning: {warning.get('message', 'Compatibility warning')}")
+
         # Check for scale appropriateness
         if architecture.scale == "enterprise":
             tech_names = [
-                tech.name.lower() 
+                tech.name.lower()
                 for category in [recommendation.backend, recommendation.frontend, recommendation.database]
                 for tech in category
             ]
-            
+
             if "sqlite" in tech_names:
                 concerns.append("SQLite not recommended for enterprise scale")
-        
+
+        # Check version recommendations
+        for tech_name, tech_version in all_techs:
+            version_info = self.compatibility_matrix.get_recommended_versions(tech_name)
+            if version_info.get("status") != "unknown":
+                lts = version_info.get("lts")
+                if lts and tech_version and tech_version != lts:
+                    min_rec = version_info.get("min_recommended", "")
+                    if min_rec and tech_version < min_rec:
+                        concerns.append(
+                            f"{tech_name} version {tech_version} is below minimum recommended ({min_rec})"
+                        )
+
         return concerns
     
     def _parse_recommendation(self, data: Dict[str, Any]) -> StackRecommendation:

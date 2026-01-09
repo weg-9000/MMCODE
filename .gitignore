@@ -1,52 +1,121 @@
-
+# ===============================
+# Python
+# ===============================
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-test_output/
+.Python
 
-build/
-dist/
-.eggs/
-*.egg-info/
-*.egg
-
-
+# Virtual environments
 .venv/
 venv/
 env/
 ENV/
 env.bak/
-.Python
 
+# Distribution / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
 
+# Testing
 htmlcov/
 .coverage
 .coverage.*
 .cache
+.pytest_cache/
 pytest_cache/
 pytest_ini
+test_output/
 
-context
-
+# Type checking
 .mypy_cache/
 .pyright/
 
-*.manifest
-*.spec
+# ===============================
+# Node.js / Frontend
+# ===============================
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
 
+# ===============================
+# IDE / Editor
+# ===============================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
+# ===============================
+# Environment & Secrets
+# ===============================
 .env
 .env.*
-!.env.example   # 예시 파일은 추적
+!.env.example
+*.pem
+*.key
+credentials.json
 
-
+# ===============================
+# Logs
+# ===============================
 logs/
 *.log
 *.out
 *.pid
 
+# ===============================
+# Database
+# ===============================
+*.db
+*.sqlite
+*.sqlite3
 
+# ===============================
+# Claude Code / AI Tools
+# ===============================
 *.claude
-.claude
 .claude/
+backend/.claude/
+
+# ===============================
+# Documentation & Context (Development Only)
+# ===============================
+# These folders contain development notes, analysis documents, and context
+# that should not be committed to the repository
+
+# Development context and analysis documents
+context/
+
+# Development documentation (architecture plans, internal docs)
+docs/
+
+# Backend evaluation results
+backend/eval_results/
+
+# ===============================
+# Mock Data & Test Fixtures (Keep Source, Exclude Large Files)
+# ===============================
+# Note: frontend/src/mocks/ is kept for development
+# but large mock data files should be excluded
+
+# ===============================
+# Frontend Test Guide (Development Only)
+# ===============================
+frontend/MVP_TEST_GUIDE.md
+
+# ===============================
+# Generated Files
+# ===============================
+*.generated.*

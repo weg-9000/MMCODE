@@ -53,21 +53,20 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Nuclei
-RUN cd /tmp && \
-    wget -q https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_3.1.0_linux_amd64.zip && \
-    unzip nuclei_3.1.0_linux_amd64.zip && \
-    mv nuclei /usr/local/bin/ && \
+# Install Nuclei using go install (more reliable)
+RUN export GOPATH=/tmp/go && \
+    export PATH=$GOPATH/bin:$PATH && \
+    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
+    mv /tmp/go/bin/nuclei /usr/local/bin/ && \
     chmod +x /usr/local/bin/nuclei && \
-    rm -f nuclei_3.1.0_linux_amd64.zip
+    rm -rf /tmp/go
 
-# Install OWASP ZAP CLI
-RUN cd /tmp && \
-    wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh && \
-    chmod +x ZAP_2_14_0_unix.sh && \
-    ./ZAP_2_14_0_unix.sh -q -dir /opt/zaproxy && \
-    ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap && \
-    rm -f ZAP_2_14_0_unix.sh
+# Install OWASP ZAP from apt repository (more reliable)
+RUN apt-get update && \
+    apt-get install -y zaproxy && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    ln -sf /usr/share/zaproxy/zap.sh /usr/local/bin/zap
 
 # Create sandbox user and directories
 RUN groupadd -g ${SANDBOX_GID} ${SANDBOX_USER} && \
@@ -109,9 +108,8 @@ RUN echo "# MMCODE Nmap Configuration" > ${CONFIG_DIR}/nmap/nmap.conf && \
     echo "concurrency: 25" >> ${CONFIG_DIR}/nuclei/nuclei.yaml && \
     echo "rate-limit: 150" >> ${CONFIG_DIR}/nuclei/nuclei.yaml
 
-# Security hardening
-RUN # Remove unnecessary packages and clean up
-    apt-get autoremove -y && \
+# Security hardening - Remove unnecessary packages and clean up
+RUN apt-get autoremove -y && \
     apt-get autoclean && \
     # Remove package manager caches
     rm -rf /var/cache/apt/* && \

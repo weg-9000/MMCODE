@@ -5,68 +5,27 @@ import uuid
 from typing import Dict, Any, List
 from datetime import datetime
 
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..models.architecture_models import (
     ArchitectureDesign, ArchitecturePattern, ScalabilityTier,
     LayerSpec, DeploymentSpec
 )
+from app.agents.shared.utils.llm_initialization import initialize_llm_sync
 
 
 class ArchitectureDesignEngine:
     """
     Core engine for creating system architecture designs from analysis results
     """
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
-        
-        # Initialize LLM with unified provider support
-        self._initialize_llm(config)
 
-    def _initialize_llm(self, config: Dict[str, Any]):
-        """Initialize LLM with unified provider system and fallback compatibility"""
-        try:
-            # Modern: Check if we have a unified LLM manager or provider
-            if hasattr(config, 'get_llm_config') and callable(config.get_llm_config):
-                # AgentConfig with unified LLM support
-                from app.core.llm_providers import DevStrategistLLMManager
-                llm_config = config.get_llm_config()
-                llm_manager = DevStrategistLLMManager(**llm_config)
-                
-                # Get LLM instance synchronously
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
-                except RuntimeError:
-                    # If no event loop, create one
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    self.llm = loop.run_until_complete(llm_manager.get_llm_instance())
-                    
-                self.logger.info("LLM initialized with unified provider system")
-                
-            else:
-                # Legacy: Fallback to OpenAI direct initialization
-                self.llm = ChatOpenAI(
-                    model = config.get("llm_model"),
-                    temperature=config.get("temperature", config.get("llm_temperature", 0.2)),
-                    openai_api_key=config.get("openai_api_key", config.get("llm_api_key"))
-                )
-                self.logger.info("LLM initialized with legacy OpenAI configuration")
-                
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize with unified provider, falling back to OpenAI: {e}")
-            # Ultimate fallback: Basic OpenAI initialization
-            self.llm = ChatOpenAI(
-                model=config.get("openai_model", "gpt-3.5-turbo"),
-                temperature=0.2,
-                openai_api_key=config.get("openai_api_key")
-            )
-        
+        # Initialize LLM with unified provider support (using shared module)
+        self.llm = initialize_llm_sync(config, default_temperature=0.2)
+
         # Architecture design prompt
         self.design_prompt = ChatPromptTemplate.from_template(
             """You are a senior software architect. Design a system architecture based on the provided analysis.

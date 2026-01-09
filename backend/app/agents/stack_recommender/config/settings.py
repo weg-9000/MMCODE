@@ -226,3 +226,8 @@ class StackTemplatesConfig(BaseSettings):
 # Global settings instance
 settings = StackRecommenderSettings()
 template_config = StackTemplatesConfig()
+
+
+def get_settings() -> StackRecommenderSettings:
+    """Get the settings instance"""
+    return settings

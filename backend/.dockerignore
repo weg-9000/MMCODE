@@ -1,0 +1,177 @@
+# ===========================================
+# MMCODE Backend Docker Build Ignore File
+# ===========================================
+# Excludes unnecessary files from Docker build context
+# to speed up builds and reduce image size.
+
+# ===================
+# Git
+# ===================
+.git
+.gitignore
+.gitattributes
+
+# ===================
+# Python
+# ===================
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ===================
+# Testing
+# ===================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+nosetests.xml
+
+# ===================
+# IDE and Editors
+# ===================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ===================
+# Documentation
+# ===================
+docs/
+*.md
+!README.md
+*.rst
+*.txt
+!requirements.txt
+
+# ===================
+# Development Files
+# ===================
+Makefile
+docker-compose*.yml
+!docker-compose.yml
+.pre-commit-config.yaml
+.flake8
+.pylintrc
+pyproject.toml
+setup.py
+setup.cfg
+tox.ini
+pytest.ini
+mypy.ini
+.mypy_cache/
+
+# ===================
+# Logs and Databases
+# ===================
+*.log
+*.logs
+*.sqlite
+*.sqlite3
+*.db
+logs/
+
+# ===================
+# Temporary Files
+# ===================
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ===================
+# OS Files
+# ===================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===================
+# Secrets and Configs
+# ===================
+.env
+.env.*
+*.local
+secrets/
+credentials/
+*.pem
+*.key
+*.crt
+
+# ===================
+# Docker Related
+# ===================
+docker/
+!docker/security-sandbox/
+Dockerfile.dev
+docker-compose.override.yml
+docker-compose.dev.yml
+
+# ===================
+# Test Fixtures
+# ===================
+tests/fixtures/
+tests/data/
+*.fixture
+
+# ===================
+# Jupyter
+# ===================
+.ipynb_checkpoints/
+*.ipynb
+
+# ===================
+# Misc
+# ===================
+*.cache
+.cache/
+node_modules/
+npm-debug.log
+yarn-error.log

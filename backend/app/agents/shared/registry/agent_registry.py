@@ -22,10 +22,13 @@ class AgentRegistry:
         
     async def register_agent(self, agent_card: AgentCard) -> bool:
         """Register an agent in the registry"""
+        import json
+
         try:
-            # Store agent card
+            # Store agent card as proper JSON
             agent_key = f"{self.prefix}:agents:{agent_card.agent_id}"
-            await self.redis.set(agent_key, agent_card.to_dict().__str__())
+            agent_data = json.dumps(agent_card.to_dict())
+            await self.redis.set(agent_key, agent_data)
             
             # Update capability index
             for capability in agent_card.capabilities:
@@ -158,14 +161,37 @@ class AgentRegistry:
             await self.redis.delete(failure_key)
             self.logger.warning(f"Unregistered unhealthy agent {agent_id} after {failures} failures")
     
-    def _parse_agent_data(self, agent_data: str) -> Optional[AgentCard]:
-        """Parse agent data from Redis (simplified implementation)"""
-        # In real implementation, use proper JSON parsing
-        # This is a placeholder for the actual parsing logic
+    def _parse_agent_data(self, agent_data: bytes | str) -> Optional[AgentCard]:
+        """Parse agent data from Redis with proper JSON deserialization"""
+        import json
+
         try:
-            # Simplified parsing - replace with proper JSON deserialization
-            return None  # Placeholder
-        except Exception:
+            # Handle bytes from Redis
+            if isinstance(agent_data, bytes):
+                agent_data = agent_data.decode('utf-8')
+
+            # Try parsing as JSON first
+            try:
+                data = json.loads(agent_data)
+            except json.JSONDecodeError:
+                # Fallback: Try to evaluate as Python dict representation
+                # This handles legacy format: {'key': 'value'} stored as string
+                import ast
+                data = ast.literal_eval(agent_data)
+
+            # Create AgentCard from parsed data
+            return AgentCard(
+                agent_id=data.get('agent_id'),
+                agent_name=data.get('agent_name', ''),
+                description=data.get('description', ''),
+                endpoint_url=data.get('endpoint_url', ''),
+                capabilities=data.get('capabilities', []),
+                version=data.get('version', '1.0.0'),
+                status=data.get('status', 'unknown'),
+                metadata=data.get('metadata', {})
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to parse agent data: {e}")
             return None
     
     async def start_health_monitoring(self):

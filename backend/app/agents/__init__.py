@@ -5,7 +5,10 @@ This module provides integration between the new modular A2A agent architecture
 and the existing FastAPI system for backward compatibility.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import asyncio
 import logging
 
 # Import new modular agents
@@ -19,6 +22,26 @@ from .threat_analyzer.core.agent import ThreatAnalyzer
 from .shared.models.a2a_models import AgentCard, A2ATask, Artifact
 from .shared.a2a_client.client import A2AClient
 from .shared.registry.agent_registry import AgentRegistry
+
+
+@dataclass
+class PentestingSession:
+    """Pentesting session model"""
+    session_id: str
+    scope: Any
+    requester_id: str
+    status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    findings: List[Any] = field(default_factory=list)
+
+
+@dataclass
+class TaskExecutionResult:
+    """Task execution result model"""
+    task_id: str
+    execution_result: Any
+    next_recommendations: List[Any] = field(default_factory=list)
 
 
 class AgentSystemManager:
@@ -45,6 +68,11 @@ class AgentSystemManager:
         # A2A infrastructure
         self.a2a_client = A2AClient()
         self.agent_registry: Optional[AgentRegistry] = None
+
+        # Session management
+        self.session_lock = asyncio.Lock()
+        self.active_sessions: Dict[str, PentestingSession] = {}
+        self.approval_integration = None
         
     async def initialize(self, redis_client=None):
         """Initialize the agent system"""

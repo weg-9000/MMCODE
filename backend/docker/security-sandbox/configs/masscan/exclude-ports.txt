@@ -1,0 +1,49 @@
+# MMCODE Masscan - Excluded Ports
+# ===============================
+# 
+# Ports to exclude from scanning due to security or stability concerns
+# These are typically management, database, or other sensitive services
+
+# SSH and remote access
+22
+
+# Windows management services  
+135
+139
+445
+3389
+
+# Database services
+1433
+1521
+3306
+5432
+6379
+27017
+
+# Legacy and deprecated services
+21
+23
+25
+110
+143
+
+# SNMP
+161
+162
+
+# Directory services
+389
+636
+
+# Other management services
+902
+5900
+5901
+5986
+5985
+
+# Dangerous ports that should never be scanned in sandbox
+0
+666
+6666

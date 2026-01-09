@@ -146,3 +146,8 @@ class DocumentAgentSettings(BaseSettings):
 
 # Global settings instance
 settings = DocumentAgentSettings()
+
+
+def get_settings() -> DocumentAgentSettings:
+    """Get the settings instance"""
+    return settings

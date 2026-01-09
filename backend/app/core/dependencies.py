@@ -311,17 +311,29 @@ async def get_agent_lazy(agent_id: str) -> Any:
             raise RuntimeError(f"Agent '{agent_id}' initialization failed: {e}")
 
 def get_requirement_analyzer_lazy() -> RequirementAnalyzer:
-    """FastAPI dependency for lazy-loaded requirement analyzer"""
+    """FastAPI dependency for lazy-loaded requirement analyzer
+
+    Note: This synchronous function is used for FastAPI Depends().
+    Uses asyncio.run() for Python 3.10+ compatibility.
+    """
     import asyncio
-    
-    # Create a new event loop for sync context if needed
+
+    async def _get_analyzer():
+        return await get_agent_lazy("requirement-analyzer")
+
+    # Python 3.10+ compatible approach
     try:
-        loop = asyncio.get_event_loop()
+        # Check if we're in an async context
+        loop = asyncio.get_running_loop()
+        # If we get here, we're in an async context - this shouldn't happen
+        # but handle it gracefully
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, _get_analyzer())
+            return future.result(timeout=30)
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(get_agent_lazy("requirement-analyzer"))
+        # No running event loop - safe to use asyncio.run()
+        return asyncio.run(_get_analyzer())
 
 # Health check utilities
 async def check_agent_health(agent_id: str) -> Dict[str, Any]:

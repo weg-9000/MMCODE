@@ -20,6 +20,14 @@ class InMemoryA2AClient:
         """로컬 호출할 에이전트 객체를 등록. agent_name은 예: architect-agent"""
         self._agents[agent_name] = agent_instance
 
+    def is_registered(self, agent_name: str) -> bool:
+        """Check if an agent is registered in the client."""
+        return agent_name in self._agents
+
+    def get_registered_agents(self) -> list:
+        """Get list of all registered agent names."""
+        return list(self._agents.keys())
+
     def _extract_agent_name_from_url(self, agent_url: str) -> str:
         """Extract agent name from various URL formats"""
         if agent_url.startswith("local://"):
@@ -57,11 +65,11 @@ class InMemoryA2AClient:
         task_id = str(uuid.uuid4())
         task = A2ATask(
             task_id=task_id,
-            correlation_id=correlation_id or str(uuid.uuid4()),
             task_type=task_type,
             status=TaskStatus.PENDING,
             context=context,
             created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         self._tasks[task_id] = task
 
@@ -71,17 +79,18 @@ class InMemoryA2AClient:
     async def _safe_execute(self, agent, task: A2ATask):
         try:
             task.status = TaskStatus.IN_PROGRESS
-            task.started_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(timezone.utc)
             handler = getattr(agent, "handle_task", None) or getattr(agent, "process_task", None)
             if not handler:
                 raise AttributeError(f"{agent} has no handle_task or process_task method")
             result = await handler(task)   # 실제 에이전트 처리
             task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(timezone.utc)
             task.result = getattr(result, "content", None) if hasattr(result, "content") else result
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error = str(e)
+            task.updated_at = datetime.now(timezone.utc)
             self.logger.exception(f"Task {task.task_id} failed: {e}")
 
     async def get_task_status(self, agent_url: str, task_id: str) -> A2ATask:

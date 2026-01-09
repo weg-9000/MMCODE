@@ -1,0 +1,99 @@
+# MMCODE Nuclei Security Configuration
+# ===================================
+#
+# Secure Nuclei configuration for sandbox environment
+# Enforces template filtering and scan rate limits
+
+# Template configuration
+templates-directory: /home/mmcode-runner/nuclei-templates
+custom-templates: /etc/mmcode-sandbox/nuclei/custom-templates
+template-display-name: true
+
+# Output configuration  
+output-directory: /tmp/scan-results
+output-format: jsonl
+include-response: false
+include-request: false
+
+# Performance and rate limiting
+concurrency: 25
+rate-limit: 150
+timeout: 5
+retries: 1
+max-host-error: 30
+
+# Network configuration
+disable-http2: false
+disable-redirects: false
+follow-redirects: false
+max-redirects: 3
+
+# Security restrictions
+# Exclude potentially dangerous templates
+exclude-templates:
+  - cves/2023/CVE-2023-27163.yaml  # Severe RCE
+  - exposures/configs/
+  - misconfiguration/
+
+# Include only approved template categories
+include-tags:
+  - cve
+  - exposure
+  - misconfig
+  - vulnerability
+  - security
+
+exclude-tags:
+  - intrusive
+  - destructive  
+  - dos
+  - rce
+  - malware
+
+# Target configuration
+timeout: 5
+max-size: 5242880  # 5MB max response size
+
+# HTTP configuration
+header:
+  - "User-Agent: Mozilla/5.0 (compatible; MMCODE-Scanner/1.0)"
+
+# Reporting configuration
+report-config: /etc/mmcode-sandbox/nuclei/report.yaml
+report-format: json
+include-response: false
+
+# Custom severity mapping
+severity:
+  info: info
+  low: low  
+  medium: medium
+  high: high
+  critical: critical
+
+# Disable automatic template updates for security
+disable-update-check: true
+offline-scan: false
+
+# Workflow configuration
+workflow-concurrency: 10
+max-workflow-iterations: 5
+
+# Debug and logging
+verbose: false
+debug: false
+silent: false
+no-color: true
+
+# Scan optimization
+skip-variables: true
+strip-ansi: true
+no-meta: false
+no-timestamp: false
+
+# Advanced security settings
+disable-clustering: true
+passive: false
+env-vars: false
+system-resolvers: true
+validate-certificate: true
